@@ -1,20 +1,170 @@
-use mutica::mutica_compiler::parser::{SourceFile, ast::LinearTypeAst};
+use mutica::mutica_compiler::SyntaxError;
+use mutica::mutica_compiler::parser::{SourceFile, WithLocation, ast::LinearTypeAst, ast::TypeAst};
+use mutica::mutica_compiler::parser::{calculate_full_error_span, report_error_recovery};
 use mutica::mutica_compiler::{
     grammar::TypeParser,
     logos::Logos,
-    parser::{ParseContext, ast::LinearizeContext, lexer::LexerToken},
+    parser::{ast::LinearizeContext, lexer::LexerToken},
 };
 use mutica::mutica_semantic::semantic::SourceMapping;
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::io::Write;
 use std::sync::{Arc, RwLock};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+// Strip ANSI CSI sequences from a string. Covers common ESC '[' ... final-byte sequences.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if let Some(next) = chars.next() {
+                if next == '[' {
+                    // consume until a final byte in range '@'..='~'
+                    while let Some(n) = chars.next() {
+                        if ('@'..='~').contains(&n) {
+                            break;
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+// Generic helper: write a report into an in-memory buffer via the provided closure,
+// strip ANSI codes and return the plain text string.
+fn report_to_plain_text<F>(write_report: F) -> String
+where
+    F: FnOnce(&mut Vec<u8>) -> std::io::Result<()>,
+{
+    let mut buf: Vec<u8> = Vec::new();
+    let _ = write_report(&mut buf);
+    let out = String::from_utf8_lossy(&buf);
+    strip_ansi(&out)
+}
+
+// 将字节偏移转换为行列号
+fn offset_to_position(content: &str, offset: usize) -> Position {
+    let mut line = 0u32;
+    let mut col = 0u32;
+    let mut current_offset = 0;
+
+    for ch in content.chars() {
+        if current_offset >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+        current_offset += ch.len_utf8();
+    }
+
+    Position {
+        line,
+        character: col,
+    }
+}
+
+// 递归清理 AST 中的 ParseError 节点，将其替换为 Bottom
+fn sanitize_ast<'input>(ast: WithLocation<TypeAst<'input>>) -> WithLocation<TypeAst<'input>> {
+    ast.map(|value| match value {
+        TypeAst::ParseError(_) => TypeAst::Bottom,
+        TypeAst::Tuple(items) => TypeAst::Tuple(items.into_iter().map(sanitize_ast).collect()),
+        TypeAst::List(items) => TypeAst::List(items.into_iter().map(sanitize_ast).collect()),
+        TypeAst::Generalize(items) => {
+            TypeAst::Generalize(items.into_iter().map(sanitize_ast).collect())
+        }
+        TypeAst::Specialize(items) => {
+            TypeAst::Specialize(items.into_iter().map(sanitize_ast).collect())
+        }
+        TypeAst::Invoke {
+            func,
+            arg,
+            continuation,
+        } => TypeAst::Invoke {
+            func: Box::new(sanitize_ast(*func)),
+            arg: Box::new(sanitize_ast(*arg)),
+            continuation: Box::new(sanitize_ast(*continuation)),
+        },
+        TypeAst::Expression {
+            binding_patterns,
+            binding_types,
+            body,
+        } => TypeAst::Expression {
+            binding_patterns: binding_patterns.into_iter().map(sanitize_ast).collect(),
+            binding_types: binding_types.into_iter().map(sanitize_ast).collect(),
+            body: Box::new(sanitize_ast(*body)),
+        },
+        TypeAst::Match {
+            value,
+            match_branch,
+            else_branch,
+        } => TypeAst::Match {
+            value: Box::new(sanitize_ast(*value)),
+            match_branch: match_branch
+                .into_iter()
+                .map(|(pattern, expr)| (sanitize_ast(pattern), sanitize_ast(expr)))
+                .collect(),
+            else_branch: else_branch.map(|b| Box::new(sanitize_ast(*b))),
+        },
+        TypeAst::Closure {
+            pattern,
+            body,
+            fail_branch,
+        } => TypeAst::Closure {
+            pattern: Box::new(sanitize_ast(*pattern)),
+            body: Box::new(sanitize_ast(*body)),
+            fail_branch: fail_branch.map(|b| Box::new(sanitize_ast(*b))),
+        },
+        TypeAst::Apply { func, arg } => TypeAst::Apply {
+            func: Box::new(sanitize_ast(*func)),
+            arg: Box::new(sanitize_ast(*arg)),
+        },
+        TypeAst::Eq { left, right } => TypeAst::Eq {
+            left: Box::new(sanitize_ast(*left)),
+            right: Box::new(sanitize_ast(*right)),
+        },
+        TypeAst::Neq { left, right } => TypeAst::Neq {
+            left: Box::new(sanitize_ast(*left)),
+            right: Box::new(sanitize_ast(*right)),
+        },
+        TypeAst::Not { value } => TypeAst::Not {
+            value: Box::new(sanitize_ast(*value)),
+        },
+        TypeAst::FixPoint { param_name, expr } => TypeAst::FixPoint {
+            param_name,
+            expr: Box::new(sanitize_ast(*expr)),
+        },
+        TypeAst::Namespace { tag, expr } => TypeAst::Namespace {
+            tag,
+            expr: Box::new(sanitize_ast(*expr)),
+        },
+        TypeAst::Pattern { name, expr } => TypeAst::Pattern {
+            name,
+            expr: Box::new(sanitize_ast(*expr)),
+        },
+        TypeAst::Literal(inner) => TypeAst::Literal(Box::new(sanitize_ast(*inner))),
+        // 基础类型保持不变
+        other => other,
+    })
+}
+
 #[derive(Debug)]
 struct Backend {
     client: Client,
     documents: RwLock<HashMap<Url, String>>,
+    // 缓存每个文件上次成功生成的 semantic tokens
+    last_tokens: RwLock<HashMap<Url, SemanticTokens>>,
 }
 
 #[tower_lsp::async_trait]
@@ -49,16 +199,45 @@ impl LanguageServer for Backend {
                         SemanticTokensOptions {
                             work_done_progress_options: Default::default(),
                             legend: SemanticTokensLegend {
+                                // Expanded, ordered list of token types. The numeric
+                                // indices returned by ast_node_to_token_type must
+                                // match this order.
                                 token_types: vec![
-                                    SemanticTokenType::VARIABLE,
-                                    SemanticTokenType::FUNCTION,
-                                    SemanticTokenType::TYPE,
-                                    SemanticTokenType::KEYWORD,
-                                    SemanticTokenType::STRING,
-                                    SemanticTokenType::NUMBER,
-                                    SemanticTokenType::COMMENT,
+                                    SemanticTokenType::NAMESPACE,      // 0
+                                    SemanticTokenType::TYPE,           // 1
+                                    SemanticTokenType::CLASS,          // 2
+                                    SemanticTokenType::ENUM,           // 3
+                                    SemanticTokenType::INTERFACE,      // 4
+                                    SemanticTokenType::STRUCT,         // 5
+                                    SemanticTokenType::TYPE_PARAMETER, // 6
+                                    SemanticTokenType::PARAMETER,      // 7
+                                    SemanticTokenType::VARIABLE,       // 8
+                                    SemanticTokenType::PROPERTY,       // 9
+                                    SemanticTokenType::ENUM_MEMBER,    // 10
+                                    SemanticTokenType::EVENT,          // 11
+                                    SemanticTokenType::FUNCTION,       // 12
+                                    SemanticTokenType::METHOD,         // 13
+                                    SemanticTokenType::MACRO,          // 14
+                                    SemanticTokenType::KEYWORD,        // 15
+                                    SemanticTokenType::MODIFIER,       // 16
+                                    SemanticTokenType::COMMENT,        // 17
+                                    SemanticTokenType::STRING,         // 18
+                                    SemanticTokenType::NUMBER,         // 19
+                                    SemanticTokenType::REGEXP,         // 20
+                                    SemanticTokenType::OPERATOR,       // 21
                                 ],
-                                token_modifiers: vec![],
+                                token_modifiers: vec![
+                                    SemanticTokenModifier::DECLARATION,
+                                    SemanticTokenModifier::DEFINITION,
+                                    SemanticTokenModifier::READONLY,
+                                    SemanticTokenModifier::STATIC,
+                                    SemanticTokenModifier::DEPRECATED,
+                                    SemanticTokenModifier::ABSTRACT,
+                                    SemanticTokenModifier::ASYNC,
+                                    SemanticTokenModifier::MODIFICATION,
+                                    SemanticTokenModifier::DOCUMENTATION,
+                                    SemanticTokenModifier::DEFAULT_LIBRARY,
+                                ],
                             },
                             range: Some(false),
                             full: Some(SemanticTokensFullOptions::Bool(true)),
@@ -90,7 +269,23 @@ impl LanguageServer for Backend {
             .await;
     }
 
-    async fn did_change(&self, _: DidChangeTextDocumentParams) {
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        // 更新文档内容
+        let uri = params.text_document.uri.clone();
+        if let Some(change) = params.content_changes.first() {
+            self.documents
+                .write()
+                .unwrap()
+                .insert(uri.clone(), change.text.clone());
+
+            // 先尝试解析，只有成功时才触发 semantic_tokens_refresh
+            if let Ok(Some(_)) = self.parse_and_generate_tokens(&change.text, &uri).await {
+                // 解析成功，通知客户端刷新语义高亮
+                let _ = self.client.semantic_tokens_refresh().await;
+            }
+            // 解析失败时不调用 refresh，客户端保持现有高亮
+        }
+
         self.client
             .log_message(MessageType::INFO, "file changed!")
             .await;
@@ -134,9 +329,26 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri;
-        if let Some(content) = self.documents.read().unwrap().get(&uri) {
-            let tokens = self.parse_and_generate_tokens(content)?;
-            Ok(Some(SemanticTokensResult::Tokens(tokens)))
+        let content = self.documents.read().unwrap().get(&uri).cloned();
+        if let Some(content) = content {
+            // parse_and_generate_tokens now returns Result<Option<SemanticTokens>>
+            let tokens_opt = self.parse_and_generate_tokens(&content, &uri).await?;
+            if let Some(tokens) = tokens_opt {
+                // 解析成功，缓存新的 tokens
+                self.last_tokens
+                    .write()
+                    .unwrap()
+                    .insert(uri, tokens.clone());
+                Ok(Some(SemanticTokensResult::Tokens(tokens)))
+            } else {
+                // 解析失败，尝试返回缓存的 tokens
+                if let Some(cached) = self.last_tokens.read().unwrap().get(&uri).cloned() {
+                    Ok(Some(SemanticTokensResult::Tokens(cached)))
+                } else {
+                    // 没有缓存，返回 None
+                    Ok(None)
+                }
+            }
         } else {
             Ok(None)
         }
@@ -144,7 +356,12 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
-    fn parse_and_generate_tokens(&self, content: &str) -> Result<SemanticTokens> {
+    // 返回 Result<Option<SemanticTokens>>，在语法/类型分析失败时返回 Ok(None)
+    async fn parse_and_generate_tokens(
+        &self,
+        content: &str,
+        uri: &Url,
+    ) -> Result<Option<SemanticTokens>> {
         let source_file = Arc::new(SourceFile::new(None, content.into()));
         let lexer = LexerToken::lexer(content);
         let spanned_lexer = lexer.spanned().map(|(token_result, span)| {
@@ -155,124 +372,199 @@ impl Backend {
         let parsed = parser.parse(&source_file, spanned_lexer);
         match parsed {
             Ok(ast) => {
+                // 先收集错误信息，在 sanitize 之前
                 let mut errors = Vec::new();
                 ast.collect_errors(&mut errors);
-                if !errors.is_empty() {
-                    return Ok(SemanticTokens {
-                        result_id: None,
-                        data: vec![],
+
+                // 将错误转换为 LSP 诊断信息并发送给客户端
+                // 无论 errors 是否为空都要调用 publish_diagnostics。
+                // 发送空 diagnostics 可以清除客户端上之前的错误提示。
+                let mut diagnostics = Vec::new();
+                for err in &errors {
+                    // 使用 calculate_full_error_span 获取错误的字节偏移范围
+                    let (start_byte, end_byte) = calculate_full_error_span(err);
+                    let start = offset_to_position(content, start_byte);
+                    let end = offset_to_position(content, end_byte);
+
+                    // 生成错误消息
+                    let report = report_error_recovery(err, uri.as_str(), content);
+                    let cache = (
+                        uri.as_str(),
+                        mutica::mutica_compiler::ariadne::Source::from(content),
+                    );
+                    let message =
+                        report_to_plain_text(|buf: &mut Vec<u8>| report.write(cache, buf));
+
+                    diagnostics.push(Diagnostic {
+                        range: Range { start, end },
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        code: None,
+                        code_description: None,
+                        source: Some("mutica-lsp".to_string()),
+                        message,
+                        related_information: None,
+                        tags: None,
+                        data: None,
                     });
                 }
-                let basic = ast.into_basic(ast.location());
+
+                // 发送诊断信息到客户端（如果为空则清除旧诊断）
+                self.client
+                    .publish_diagnostics(uri.clone(), diagnostics, None)
+                    .await;
+
+                // 清理 AST 中的 ParseError 节点，避免 into_basic panic
+                let sanitized_ast = sanitize_ast(ast);
+                let basic = sanitized_ast.into_basic(sanitized_ast.location());
                 let linearized = basic
                     .linearize(&mut LinearizeContext::new(), basic.location())
                     .finalize();
-                let flow_result =
-                    linearized.flow(&mut ParseContext::new(), false, linearized.location());
-                let flowed = match &flow_result {
-                    Ok(result) => result.ty().clone(),
-                    Err(_) => {
-                        return Ok(SemanticTokens {
-                            result_id: None,
-                            data: vec![],
-                        });
-                    }
-                };
-                let mapping = SourceMapping::from_ast(&flowed, &source_file);
-                // 生成tokens
+
+                let mapping = SourceMapping::from_ast(&linearized, &source_file);
+
+                // 生成tokens - 按行处理,避免跨行token
                 let mut tokens = Vec::new();
                 let mut last_line = 0u32;
                 let mut last_start = 0u32;
-                let mut current_start: Option<usize> = None;
-                let mut current_type: Option<u32> = None;
-                for (i, node_opt) in mapping.mapping().iter().enumerate() {
-                    let ty = if let Some(node) = node_opt {
-                        self.ast_node_to_token_type(&node.value())
-                    } else {
-                        6 // COMMENT
-                    };
-                    if current_type != Some(ty) {
-                        if let (Some(start), Some(typ)) = (current_start, current_type) {
-                            // 输出token
-                            let length = i - start;
-                            // 计算行和列
-                            let before = &content[..start];
-                            let lines: Vec<&str> = before.split('\n').collect();
-                            let line = lines.len() - 1;
-                            let col = lines.last().unwrap().len();
-                            let delta_line = line as u32 - last_line;
-                            let delta_start = if delta_line == 0 {
-                                col as u32 - last_start
-                            } else {
-                                col as u32
-                            };
-                            tokens.push(SemanticToken {
-                                delta_line,
-                                delta_start,
-                                length: length as u32,
-                                token_type: typ,
-                                token_modifiers_bitset: 0,
-                            });
-                            last_line = line as u32;
-                            last_start = col as u32;
+
+                let lines: Vec<&str> = content.split('\n').collect();
+                let mut byte_offset = 0;
+
+                for (line_num, line_content) in lines.iter().enumerate() {
+                    let line_start = byte_offset;
+                    let line_end = byte_offset + line_content.len();
+
+                    let mut current_start: Option<usize> = None;
+                    let mut current_type: Option<u32> = None;
+
+                    // 处理当前行的每个字节
+                    for i in line_start..line_end {
+                        let ty = mapping
+                            .mapping()
+                            .get(i)
+                            .and_then(|node_opt| node_opt.as_ref())
+                            .map(|node| self.ast_node_to_token_type(&node.value()))
+                            .unwrap_or(17); // COMMENT
+
+                        if current_type != Some(ty) {
+                            // 输出之前的token
+                            if let (Some(start), Some(typ)) = (current_start, current_type) {
+                                let length = i - start;
+                                let col = start - line_start;
+                                let delta_line = line_num as u32 - last_line;
+                                let delta_start = if delta_line == 0 {
+                                    col as u32 - last_start
+                                } else {
+                                    col as u32
+                                };
+                                tokens.push(SemanticToken {
+                                    delta_line,
+                                    delta_start,
+                                    length: length as u32,
+                                    token_type: typ,
+                                    token_modifiers_bitset: 0,
+                                });
+                                last_line = line_num as u32;
+                                last_start = col as u32;
+                            }
+                            current_start = Some(i);
+                            current_type = Some(ty);
                         }
-                        current_start = Some(i);
-                        current_type = Some(ty);
                     }
+
+                    // 输出本行最后一个token
+                    if let (Some(start), Some(typ)) = (current_start, current_type) {
+                        let length = line_end - start;
+                        let col = start - line_start;
+                        let delta_line = line_num as u32 - last_line;
+                        let delta_start = if delta_line == 0 {
+                            col as u32 - last_start
+                        } else {
+                            col as u32
+                        };
+                        tokens.push(SemanticToken {
+                            delta_line,
+                            delta_start,
+                            length: length as u32,
+                            token_type: typ,
+                            token_modifiers_bitset: 0,
+                        });
+                        last_line = line_num as u32;
+                        last_start = col as u32;
+                    }
+
+                    // 移动到下一行(+1 for \n)
+                    byte_offset = line_end + 1;
                 }
-                // 输出最后一个token
-                if let (Some(start), Some(typ)) = (current_start, current_type) {
-                    let length = content.len() - start;
-                    let before = &content[..start];
-                    let lines: Vec<&str> = before.split('\n').collect();
-                    let line = lines.len() - 1;
-                    let col = lines.last().unwrap().len();
-                    let delta_line = line as u32 - last_line;
-                    let delta_start = if delta_line == 0 {
-                        col as u32 - last_start
-                    } else {
-                        col as u32
-                    };
-                    tokens.push(SemanticToken {
-                        delta_line,
-                        delta_start,
-                        length: length as u32,
-                        token_type: typ,
-                        token_modifiers_bitset: 0,
-                    });
-                }
-                Ok(SemanticTokens {
+                Ok(Some(SemanticTokens {
                     result_id: None,
                     data: tokens,
-                })
+                }))
             }
-            Err(_) => Ok(SemanticTokens {
-                result_id: None,
-                data: vec![],
-            }),
+            Err(e) => {
+                // 将解析错误格式化并发送为 LSP Diagnostic
+                let err_report = SyntaxError::new(e).report(uri.to_string(), content);
+                let cache = (
+                    uri.to_string(),
+                    mutica::mutica_compiler::ariadne::Source::from(content),
+                );
+                let plain = report_to_plain_text(|buf: &mut Vec<u8>| err_report.write(cache, buf));
+                let _ = std::io::stderr().write_all(plain.as_bytes());
+
+                // 尝试从 SyntaxError / ErrorRecovery 中获取 span，发布诊断
+                // 如果无法得到更精确的范围，则将诊断范围设为整个文档起始位置
+                let mut diagnostics = Vec::new();
+                // SyntaxError::new(e).report(...) 返回 Report, 但我们仍然可以
+                // 使用 lalrpop 的 calculate_full_error_span 逻辑 if we had ErrorRecovery.
+                // 退路：将整个文档的起始位置作为错误范围，确保客户端能显示诊断。
+                let start = Position {
+                    line: 0,
+                    character: 0,
+                };
+                let end = offset_to_position(content, content.len());
+                diagnostics.push(Diagnostic {
+                    range: Range { start, end },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: None,
+                    code_description: None,
+                    source: Some("mutica-lsp".to_string()),
+                    message: plain,
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                });
+
+                self.client
+                    .publish_diagnostics(uri.clone(), diagnostics, None)
+                    .await;
+
+                // 解析失败，返回 None（保持客户端已有着色）
+                Ok(None)
+            }
         }
     }
 
     fn ast_node_to_token_type(&self, node: &LinearTypeAst) -> u32 {
         match node {
-            LinearTypeAst::Variable(_) => 0,      // VARIABLE
-            LinearTypeAst::Closure { .. } => 1,   // FUNCTION
-            LinearTypeAst::Invoke { .. } => 1,    // FUNCTION
-            LinearTypeAst::FixPoint { .. } => 1,  // FUNCTION
-            LinearTypeAst::Int => 2,              // TYPE
-            LinearTypeAst::Char => 2,             // TYPE
-            LinearTypeAst::Top => 2,              // TYPE
-            LinearTypeAst::Bottom => 2,           // TYPE
-            LinearTypeAst::Tuple(_) => 2,         // TYPE
-            LinearTypeAst::List(_) => 2,          // TYPE
-            LinearTypeAst::Generalize(_) => 2,    // TYPE
-            LinearTypeAst::Specialize(_) => 2,    // TYPE
-            LinearTypeAst::Namespace { .. } => 2, // TYPE
-            LinearTypeAst::IntLiteral(_) => 5,    // NUMBER
-            LinearTypeAst::CharLiteral(_) => 4,   // STRING
-            LinearTypeAst::Literal(_) => 4,       // STRING
-            LinearTypeAst::AtomicOpcode(_) => 3,  // KEYWORD
-            LinearTypeAst::Pattern { .. } => 0,   // VARIABLE
+            // Map AST nodes to indices in the expanded legend above.
+            LinearTypeAst::Variable(_) => 8, // VARIABLE (index 8)
+            LinearTypeAst::Pattern { .. } => 10, // ENUM_MEMBER (10)
+            LinearTypeAst::Closure { .. } => 12, // FUNCTION (12)
+            LinearTypeAst::Invoke { .. } => 11, // EVENT (11)
+            LinearTypeAst::FixPoint { .. } => 12, // FUNCTION
+            LinearTypeAst::Int => 1,         // TYPE (1)
+            LinearTypeAst::Char => 1,        // TYPE
+            LinearTypeAst::Top => 1,         // TYPE
+            LinearTypeAst::Bottom => 1,      // TYPE
+            LinearTypeAst::Tuple(_) => 5,    // STRUCT (5)
+            LinearTypeAst::List(_) => 5,     // STRUCT
+            LinearTypeAst::Generalize(_) => 6, // TYPE_PARAMETER (6)
+            LinearTypeAst::Specialize(_) => 6, // TYPE_PARAMETER
+            LinearTypeAst::Namespace { .. } => 0, // NAMESPACE (0)
+            LinearTypeAst::IntLiteral(_) => 19, // NUMBER (19)
+            LinearTypeAst::CharLiteral(_) => 18, // STRING (18)
+            LinearTypeAst::Literal(_) => 18, // STRING
+            LinearTypeAst::AtomicOpcode(_) => 15, // KEYWORD (15)
         }
     }
 }
@@ -285,6 +577,7 @@ async fn main() {
     let (service, socket) = LspService::new(|client| Backend {
         client,
         documents: RwLock::new(HashMap::new()),
+        last_tokens: RwLock::new(HashMap::new()),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }

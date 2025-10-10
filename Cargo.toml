@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-mutica = "0.1.0"
+mutica = { version = "0.1.5", path = "../Mutica" }
 tower-lsp = "0.20.0"
 serde_json = "1.0.145"
 anyhow = "1.0.100"
 tokio = { version = "1.47.1", features = ["full"] }
+log = "0.4.28"
