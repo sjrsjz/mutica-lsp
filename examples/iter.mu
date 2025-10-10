@@ -1,8 +1,8 @@
 let println: any = 
-    rec f: x: (() | (any, any)) |-> 
+    rec f: x: (() | (char, any)) |-> 
         match x
             | () => ()
-            | (head: any, tail: any) => {
+            | (head: char, tail: any) => {
                 discard print(head);
                 f(tail)
             }
