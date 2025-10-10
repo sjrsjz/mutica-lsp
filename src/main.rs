@@ -1,6 +1,10 @@
 use mutica::mutica_compiler::SyntaxError;
-use mutica::mutica_compiler::parser::{SourceFile, WithLocation, ast::LinearTypeAst, ast::TypeAst};
-use mutica::mutica_compiler::parser::{calculate_full_error_span, report_error_recovery};
+use mutica::mutica_compiler::parser::{
+    ParseContext, ParseError, calculate_full_error_span, report_error_recovery,
+};
+use mutica::mutica_compiler::parser::{
+    SourceFile, WithLocation, ast::FlowedMetaData, ast::LinearTypeAst, ast::TypeAst,
+};
 use mutica::mutica_compiler::{
     grammar::TypeParser,
     logos::Logos,
@@ -159,12 +163,36 @@ fn sanitize_ast<'input>(ast: WithLocation<TypeAst<'input>>) -> WithLocation<Type
     })
 }
 
+// 将 ParseError 转换为友好的单行消息
+fn perr_to_message(err: &ParseError) -> Option<String> {
+    match err {
+        ParseError::UseBeforeDeclaration(_, name) => {
+            Some(format!("Use of undeclared variable '{}'", name))
+        }
+        ParseError::RedeclaredPattern(_, name) => {
+            Some(format!("Redeclared pattern variable '{}'", name.value()))
+        }
+        ParseError::UnusedVariable(_, names) => {
+            let vars: Vec<String> = names.iter().map(|n| n.value().clone()).collect();
+            Some(format!("Unused variables: {}", vars.join(", ")))
+        }
+        ParseError::AmbiguousPattern(_) => Some("Ambiguous pattern".to_string()),
+        ParseError::PatternOutOfParameterDefinition(_) => {
+            Some("Pattern out of parameter definition".to_string())
+        }
+        ParseError::MissingBranch(_) => Some("Missing required branch".to_string()),
+        ParseError::InternalError(msg) => Some(format!("Internal error: {}", msg)),
+    }
+}
+
 #[derive(Debug)]
 struct Backend {
     client: Client,
     documents: RwLock<HashMap<Url, String>>,
     // 缓存每个文件上次成功生成的 semantic tokens
     last_tokens: RwLock<HashMap<Url, SemanticTokens>>,
+    // 缓存每个文件的引用表：Vec<(使用位置, 定义位置)>
+    reference_table: RwLock<HashMap<Url, Vec<(Range, Range)>>>,
 }
 
 #[tower_lsp::async_trait]
@@ -194,6 +222,9 @@ impl LanguageServer for Backend {
                     }),
                     file_operations: None,
                 }),
+                definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
@@ -353,6 +384,165 @@ impl LanguageServer for Backend {
             Ok(None)
         }
     }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let table = self.reference_table.read().unwrap();
+        if let Some(references) = table.get(&uri) {
+            // 查找包含该位置的使用范围
+            for (use_range, def_range) in references {
+                if position_in_range(&position, use_range) {
+                    return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                        uri: uri.clone(),
+                        range: *def_range,
+                    })));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
+
+        let table = self.reference_table.read().unwrap();
+        if let Some(references) = table.get(&uri) {
+            // 先确定用户点击的是定义还是使用
+            let mut target_def_range: Option<Range> = None;
+
+            // 检查是否点击在某个使用位置上
+            for (use_range, def_range) in references {
+                if position_in_range(&position, use_range) {
+                    target_def_range = Some(*def_range);
+                    break;
+                }
+            }
+
+            // 如果没找到，检查是否点击在定义位置上
+            if target_def_range.is_none() {
+                for (_, def_range) in references {
+                    if position_in_range(&position, def_range) {
+                        target_def_range = Some(*def_range);
+                        break;
+                    }
+                }
+            }
+
+            if let Some(def_range) = target_def_range {
+                let mut locations = Vec::new();
+
+                // 收集所有指向该定义的引用
+                for (use_range, d_range) in references {
+                    if ranges_equal(d_range, &def_range) {
+                        locations.push(Location {
+                            uri: uri.clone(),
+                            range: *use_range,
+                        });
+                    }
+                }
+
+                // 如果需要包含声明，添加定义位置
+                if include_declaration {
+                    locations.push(Location {
+                        uri: uri.clone(),
+                        range: def_range,
+                    });
+                }
+
+                return Ok(Some(locations));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        let table = self.reference_table.read().unwrap();
+        if let Some(references) = table.get(&uri) {
+            // 找到目标定义
+            let mut target_def_range: Option<Range> = None;
+
+            // 检查是否点击在某个使用位置上
+            for (use_range, def_range) in references {
+                if position_in_range(&position, use_range) {
+                    target_def_range = Some(*def_range);
+                    break;
+                }
+            }
+
+            // 如果没找到，检查是否点击在定义位置上
+            if target_def_range.is_none() {
+                for (_, def_range) in references {
+                    if position_in_range(&position, def_range) {
+                        target_def_range = Some(*def_range);
+                        break;
+                    }
+                }
+            }
+
+            if let Some(def_range) = target_def_range {
+                let mut text_edits = Vec::new();
+
+                // 收集定义位置
+                text_edits.push(TextEdit {
+                    range: def_range,
+                    new_text: new_name.clone(),
+                });
+
+                // 收集所有引用位置
+                for (use_range, d_range) in references {
+                    if ranges_equal(d_range, &def_range) {
+                        text_edits.push(TextEdit {
+                            range: *use_range,
+                            new_text: new_name.clone(),
+                        });
+                    }
+                }
+
+                let mut changes = HashMap::new();
+                changes.insert(uri.clone(), text_edits);
+
+                return Ok(Some(WorkspaceEdit {
+                    changes: Some(changes),
+                    document_changes: None,
+                    change_annotations: None,
+                }));
+            }
+        }
+        Ok(None)
+    }
+}
+
+// 辅助函数：判断位置是否在范围内
+fn position_in_range(pos: &Position, range: &Range) -> bool {
+    if pos.line < range.start.line || pos.line > range.end.line {
+        return false;
+    }
+    if pos.line == range.start.line && pos.character < range.start.character {
+        return false;
+    }
+    if pos.line == range.end.line && pos.character > range.end.character {
+        return false;
+    }
+    true
+}
+
+// 辅助函数：判断两个范围是否相等
+fn ranges_equal(a: &Range, b: &Range) -> bool {
+    a.start.line == b.start.line
+        && a.start.character == b.start.character
+        && a.end.line == b.end.line
+        && a.end.character == b.end.character
 }
 
 impl Backend {
@@ -419,6 +609,283 @@ impl Backend {
                 let linearized = basic
                     .linearize(&mut LinearizeContext::new(), basic.location())
                     .finalize();
+
+                let flowed_result: std::result::Result<
+                    mutica::mutica_compiler::parser::ast::FlowResult<'_>,
+                    ParseError<'_>,
+                > = linearized.flow(&mut ParseContext::new(), false, basic.location());
+
+                match flowed_result {
+                    Ok(flowed) => {
+                        // 当语义分析成功时，遍历整个 AST 树，从每个节点的 FlowedMetaData.reference
+                        // 中提取"使用位置 -> 定义位置"的引用关系表。
+                        let mut reference_table: Vec<(Range, Range)> = Vec::new();
+
+                        // 递归遍历 AST 节点收集引用信息
+                        fn collect_references<'ast>(
+                            node: &WithLocation<LinearTypeAst<'ast>, FlowedMetaData<'ast>>,
+                            content: &str,
+                            table: &mut Vec<(Range, Range)>,
+                        ) {
+                            // 检查当前节点的 reference 字段
+                            if let Some(use_loc) = node.location() {
+                                if let Some(ref_with_loc) = node.payload().reference() {
+                                    if let Some(def_loc) = ref_with_loc.location() {
+                                        let use_span = use_loc.span();
+                                        let def_span = def_loc.span();
+
+                                        let use_range = Range {
+                                            start: offset_to_position(content, use_span.start),
+                                            end: offset_to_position(content, use_span.end),
+                                        };
+
+                                        // 对于定义位置是 Pattern 的情况，只定位模式名而非整个模式
+                                        // 从源码中提取 name 的精确范围：从 def_span.start 开始，到第一个冒号或空格结束
+                                        let def_text = &content[def_span.start..def_span.end];
+                                        let name_len = if let Some(colon_pos) = def_text.find(':') {
+                                            colon_pos.min(def_text.find(' ').unwrap_or(colon_pos))
+                                        } else {
+                                            def_text.len()
+                                        };
+
+                                        let def_range = Range {
+                                            start: offset_to_position(content, def_span.start),
+                                            end: offset_to_position(
+                                                content,
+                                                def_span.start + name_len,
+                                            ),
+                                        };
+
+                                        table.push((use_range, def_range));
+                                    }
+                                }
+                            }
+
+                            // 递归遍历所有子节点
+                            match node.value() {
+                                LinearTypeAst::Tuple(items)
+                                | LinearTypeAst::List(items)
+                                | LinearTypeAst::Generalize(items)
+                                | LinearTypeAst::Specialize(items) => {
+                                    for item in items {
+                                        collect_references(item, content, table);
+                                    }
+                                }
+                                LinearTypeAst::Closure {
+                                    pattern,
+                                    body,
+                                    fail_branch,
+                                    ..
+                                } => {
+                                    collect_references(pattern, content, table);
+                                    collect_references(body, content, table);
+                                    if let Some(fb) = fail_branch {
+                                        collect_references(fb, content, table);
+                                    }
+                                }
+                                LinearTypeAst::Invoke {
+                                    func,
+                                    arg,
+                                    continuation,
+                                } => {
+                                    collect_references(func, content, table);
+                                    collect_references(arg, content, table);
+                                    collect_references(continuation, content, table);
+                                }
+                                LinearTypeAst::Pattern { expr, .. } => {
+                                    collect_references(expr, content, table);
+                                }
+                                LinearTypeAst::Namespace { expr, .. } => {
+                                    collect_references(expr, content, table);
+                                }
+                                LinearTypeAst::FixPoint { expr, .. } => {
+                                    collect_references(expr, content, table);
+                                }
+                                LinearTypeAst::Literal(inner) => {
+                                    collect_references(inner, content, table);
+                                }
+                                // 叶子节点：Variable, Int, Char, Top, Bottom, IntLiteral, CharLiteral, AtomicOpcode
+                                _ => {}
+                            }
+                        }
+
+                        collect_references(flowed.ty(), content, &mut reference_table);
+
+                        // 缓存引用表到 Backend
+                        self.reference_table
+                            .write()
+                            .unwrap()
+                            .insert(uri.clone(), reference_table.clone());
+
+                        // 将引用表输出到 stderr，便于调试
+                        if !reference_table.is_empty() {
+                            let mut out = String::new();
+                            for (use_range, def_range) in &reference_table {
+                                out.push_str(&format!(
+                                    "{}:{}-{}:{} -> {}:{}-{}:{}\n",
+                                    use_range.start.line,
+                                    use_range.start.character,
+                                    use_range.end.line,
+                                    use_range.end.character,
+                                    def_range.start.line,
+                                    def_range.start.character,
+                                    def_range.end.line,
+                                    def_range.end.character
+                                ));
+                            }
+                            let _ = std::io::stderr().write_all(out.as_bytes());
+                        }
+                    }
+                    Err(e) => {
+                        // 处理语义分析错误：写入 stderr
+                        let err_report = e.report();
+                        let cache = (
+                            uri.to_string(),
+                            mutica::mutica_compiler::ariadne::Source::from(content),
+                        );
+                        let plain =
+                            report_to_plain_text(|buf: &mut Vec<u8>| err_report.write(cache, buf));
+                        let _ = std::io::stderr().write_all(plain.as_bytes());
+
+                        // 尝试从错误中提取更精确的位置：
+                        // 如果 e 包含 ParseError 或者包含 WithLocation，优先使用这些位置信息
+                        let mut diagnostics: Vec<Diagnostic> = Vec::new();
+
+                        // 下面直接匹配 ParseError 各个变体（借用），提取精确位置并生成 Diagnostic
+                        match &e {
+                            ParseError::UseBeforeDeclaration(ast, name) => {
+                                if let Some(loc) = ast.location() {
+                                    let span = loc.span().clone();
+                                    let start = offset_to_position(content, span.start);
+                                    let end = offset_to_position(content, span.end);
+                                    let message = format!("Use of undeclared variable '{}'", name);
+                                    diagnostics.push(Diagnostic {
+                                        range: Range { start, end },
+                                        severity: Some(DiagnosticSeverity::ERROR),
+                                        code: None,
+                                        code_description: None,
+                                        source: Some("mutica-lsp".to_string()),
+                                        message,
+                                        related_information: None,
+                                        tags: None,
+                                        data: None,
+                                    });
+                                }
+                            }
+                            ParseError::RedeclaredPattern(ast, name) => {
+                                if let Some(loc) = name.location().or_else(|| ast.location()) {
+                                    let span = loc.span().clone();
+                                    let start = offset_to_position(content, span.start);
+                                    let end = offset_to_position(content, span.end);
+                                    let message =
+                                        format!("Redeclared pattern variable '{}'", name.value());
+                                    diagnostics.push(Diagnostic {
+                                        range: Range { start, end },
+                                        severity: Some(DiagnosticSeverity::ERROR),
+                                        code: None,
+                                        code_description: None,
+                                        source: Some("mutica-lsp".to_string()),
+                                        message,
+                                        related_information: None,
+                                        tags: None,
+                                        data: None,
+                                    });
+                                }
+                            }
+                            ParseError::UnusedVariable(_ast, names) => {
+                                // 为所有有位置信息的变量生成 label
+                                for name_loc in names.iter() {
+                                    if let Some(loc) = name_loc.location() {
+                                        let span = loc.span().clone();
+                                        let start = offset_to_position(content, span.start);
+                                        let end = offset_to_position(content, span.end);
+                                        let message = format!(
+                                            "Variable '{}' is declared but never used",
+                                            name_loc.value()
+                                        );
+                                        diagnostics.push(Diagnostic {
+                                            range: Range { start, end },
+                                            severity: Some(DiagnosticSeverity::ERROR),
+                                            code: None,
+                                            code_description: None,
+                                            source: Some("mutica-lsp".to_string()),
+                                            message: message.clone(),
+                                            related_information: None,
+                                            tags: None,
+                                            data: None,
+                                        });
+                                    }
+                                }
+                            }
+                            ParseError::AmbiguousPattern(ast)
+                            | ParseError::PatternOutOfParameterDefinition(ast)
+                            | ParseError::MissingBranch(ast) => {
+                                if let Some(loc) = ast.location() {
+                                    let span = loc.span().clone();
+                                    let start = offset_to_position(content, span.start);
+                                    let end = offset_to_position(content, span.end);
+                                    let message = match perr_to_message(&e) {
+                                        Some(m) => m,
+                                        None => plain.clone(),
+                                    };
+                                    diagnostics.push(Diagnostic {
+                                        range: Range { start, end },
+                                        severity: Some(DiagnosticSeverity::ERROR),
+                                        code: None,
+                                        code_description: None,
+                                        source: Some("mutica-lsp".to_string()),
+                                        message,
+                                        related_information: None,
+                                        tags: None,
+                                        data: None,
+                                    });
+                                }
+                            }
+                            ParseError::InternalError(msg) => {
+                                let start = Position {
+                                    line: 0,
+                                    character: 0,
+                                };
+                                let end = offset_to_position(content, content.len());
+                                diagnostics.push(Diagnostic {
+                                    range: Range { start, end },
+                                    severity: Some(DiagnosticSeverity::ERROR),
+                                    code: None,
+                                    code_description: None,
+                                    source: Some("mutica-lsp".to_string()),
+                                    message: msg.clone(),
+                                    related_information: None,
+                                    tags: None,
+                                    data: None,
+                                });
+                            }
+                        }
+
+                        if diagnostics.is_empty() {
+                            // 兜底：发送整体诊断
+                            let start = Position {
+                                line: 0,
+                                character: 0,
+                            };
+                            let end = offset_to_position(content, content.len());
+                            diagnostics.push(Diagnostic {
+                                range: Range { start, end },
+                                severity: Some(DiagnosticSeverity::ERROR),
+                                code: None,
+                                code_description: None,
+                                source: Some("mutica-lsp".to_string()),
+                                message: plain.clone(),
+                                related_information: None,
+                                tags: None,
+                                data: None,
+                            });
+                        }
+
+                        self.client
+                            .publish_diagnostics(uri.clone(), diagnostics, None)
+                            .await;
+                    }
+                }
 
                 let mapping = SourceMapping::from_ast(&linearized, &source_file);
 
@@ -578,6 +1045,7 @@ async fn main() {
         client,
         documents: RwLock::new(HashMap::new()),
         last_tokens: RwLock::new(HashMap::new()),
+        reference_table: RwLock::new(HashMap::new()),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
