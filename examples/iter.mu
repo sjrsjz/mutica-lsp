@@ -8,3 +8,4 @@ let println: any =
             }
             | panic;
 discard println("Hello, World!\n");
+discard print 'A';

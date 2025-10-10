@@ -160,10 +160,8 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, _: CompletionParams) -> Result<Option<CompletionResponse>> {
-        Ok(Some(CompletionResponse::Array(vec![
-            CompletionItem::new_simple("Hello".to_string(), "Some details".to_string()),
-            CompletionItem::new_simple("Bye".to_string(), "More details".to_string()),
-        ])))
+        let items = crate::lsp::completion::get_completion_items();
+        Ok(Some(CompletionResponse::Array(items)))
     }
 
     async fn execute_command(&self, _: ExecuteCommandParams) -> Result<Option<serde_json::Value>> {

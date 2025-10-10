@@ -31,14 +31,32 @@
         "path": "./syntaxes/mutica.tmGrammar.json"
       }
     ],
+    "commands": [
+      {
+        "command": "mutica.run",
+        "title": "Run Mutica File"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "mutica.run",
+        "key": "f5",
+        "when": "resourceExtname == .mu"
+      }
+    ],
     "configuration": {
       "type": "object",
       "title": "Mutica LSP",
       "properties": {
         "muticaLsp.serverPath": {
           "type": "string",
-          "default": "",
+          "default": "mutica-lsp",
           "description": "Path to the Mutica LSP server executable"
+        },
+        "muticaLsp.compilerPath": {
+          "type": "string",
+          "default": "mutica",
+          "description": "Path to the Mutica compiler executable"
         },
         "muticaLsp.trace.server": {
           "scope": "window",
