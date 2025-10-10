@@ -58,6 +58,7 @@ impl LanguageServer for Backend {
                                 SemanticTokenType::KEYWORD,
                                 SemanticTokenType::STRING,
                                 SemanticTokenType::NUMBER,
+                                SemanticTokenType::COMMENT,
                             ],
                             token_modifiers: vec![],
                         },
@@ -164,40 +165,58 @@ impl Backend {
                 let mapping = SourceMapping::from_ast(&flowed, &source_file);
                 // 生成tokens
                 let mut tokens = Vec::new();
-                let mut added_spans = std::collections::HashSet::new();
-                let mut last_line = 0;
-                let mut last_start = 0;
-                for node_opt in mapping.get_mapping().iter() {
-                    if let Some(node) = node_opt {
-                        if let Some(loc) = node.location() {
-                            let span = loc.span();
-                            let start = span.start;
-                            let end = span.end;
-                            if added_spans.insert((start, end)) {
-                                let length = end - start;
-                                // 计算行和列
-                                let before = &content[..start];
-                                let lines: Vec<&str> = before.split('\n').collect();
-                                let line = lines.len() - 1;
-                                let col = lines.last().unwrap().len();
-                                let delta_line = line as u32 - last_line;
-                                let delta_start = if delta_line == 0 { col as u32 - last_start } else { col as u32 };
-                                let token_type = self.ast_node_to_token_type(&node.value());
-                                tokens.push(SemanticToken {
-                                    delta_line,
-                                    delta_start,
-                                    length: length as u32,
-                                    token_type,
-                                    token_modifiers_bitset: 0,
-                                });
-                                last_line = line as u32;
-                                last_start = col as u32;
-                            }
+                let mut last_line = 0u32;
+                let mut last_start = 0u32;
+                let mut current_start: Option<usize> = None;
+                let mut current_type: Option<u32> = None;
+                for (i, node_opt) in mapping.get_mapping().iter().enumerate() {
+                    let ty = if let Some(node) = node_opt {
+                        self.ast_node_to_token_type(&node.value())
+                    } else {
+                        6 // COMMENT
+                    };
+                    if current_type != Some(ty) {
+                        if let (Some(start), Some(typ)) = (current_start, current_type) {
+                            // 输出token
+                            let length = i - start;
+                            // 计算行和列
+                            let before = &content[..start];
+                            let lines: Vec<&str> = before.split('\n').collect();
+                            let line = lines.len() - 1;
+                            let col = lines.last().unwrap().len();
+                            let delta_line = line as u32 - last_line;
+                            let delta_start = if delta_line == 0 { col as u32 - last_start } else { col as u32 };
+                            tokens.push(SemanticToken {
+                                delta_line,
+                                delta_start,
+                                length: length as u32,
+                                token_type: typ,
+                                token_modifiers_bitset: 0,
+                            });
+                            last_line = line as u32;
+                            last_start = col as u32;
                         }
+                        current_start = Some(i);
+                        current_type = Some(ty);
                     }
                 }
-                // 排序tokens按位置
-                tokens.sort_by_key(|t| (t.delta_line, t.delta_start));
+                // 输出最后一个token
+                if let (Some(start), Some(typ)) = (current_start, current_type) {
+                    let length = content.len() - start;
+                    let before = &content[..start];
+                    let lines: Vec<&str> = before.split('\n').collect();
+                    let line = lines.len() - 1;
+                    let col = lines.last().unwrap().len();
+                    let delta_line = line as u32 - last_line;
+                    let delta_start = if delta_line == 0 { col as u32 - last_start } else { col as u32 };
+                    tokens.push(SemanticToken {
+                        delta_line,
+                        delta_start,
+                        length: length as u32,
+                        token_type: typ,
+                        token_modifiers_bitset: 0,
+                    });
+                }
                 Ok(SemanticTokens { result_id: None, data: tokens })
             }
             Err(_) => Ok(SemanticTokens { result_id: None, data: vec![] }),
