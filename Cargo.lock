@@ -764,57 +764,35 @@ dependencies = [
 
 [[package]]
 name = "mutica"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e5cc67b15aaf46877bf65d92a5375637e47ce4dcb29071e5050f9c05335a4d1"
+checksum = "aa0ebab62f3fdc1f9ee78fce624e7ad963bf4cc6abd5bf0ebaf24d6756126748"
 dependencies = [
  "clap",
- "mutica-compiler 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "mutica-core 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "mutica-semantic 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mutica-compiler",
+ "mutica-core",
+ "mutica-semantic",
 ]
 
 [[package]]
 name = "mutica-compiler"
-version = "0.1.0"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48d3dd9d6498ec26f58f73cf879cc3a551edddffd9dc9042802263b4e0c89cfc"
 dependencies = [
  "ariadne",
  "lalrpop",
  "lalrpop-util",
  "logos",
- "mutica-core 0.1.0",
- "stacksafe",
-]
-
-[[package]]
-name = "mutica-compiler"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "689f89dc20962151915c54aff2af70f10ae7a639913aadab98e07aa6cd41f40b"
-dependencies = [
- "ariadne",
- "lalrpop",
- "lalrpop-util",
- "logos",
- "mutica-core 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mutica-core",
  "stacksafe",
 ]
 
 [[package]]
 name = "mutica-core"
-version = "0.1.0"
-dependencies = [
- "rust-arc-gc",
- "smallvec",
- "stacksafe",
- "thiserror",
-]
-
-[[package]]
-name = "mutica-core"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db6614dee5b9e92d3b8988edfd0bfff1f071e40275d7aaf96a74e4bb026ca41b"
+checksum = "3aad8ca56085b30f07c72f0949a12a4342c710710116ae5e4068224fd899490d"
 dependencies = [
  "rust-arc-gc",
  "smallvec",
@@ -828,8 +806,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "mutica",
- "mutica-compiler 0.1.0",
- "mutica-semantic 0.1.0",
  "serde_json",
  "tokio",
  "tower-lsp",
@@ -837,20 +813,12 @@ dependencies = [
 
 [[package]]
 name = "mutica-semantic"
-version = "0.1.0"
-dependencies = [
- "mutica-compiler 0.1.0",
- "mutica-core 0.1.0",
-]
-
-[[package]]
-name = "mutica-semantic"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de6dacd7cf6a74339bfe3ae109aa6ea452d714efc4400043101848df59044223"
+checksum = "930c5b0ed9da548d34974e0b9901deb191a1b37fcd8cc4fae4f63b0547285119"
 dependencies = [
- "mutica-compiler 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "mutica-core 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mutica-compiler",
+ "mutica-core",
 ]
 
 [[package]]
