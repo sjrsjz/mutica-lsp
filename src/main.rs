@@ -1,10 +1,23 @@
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
+use mutica_compiler::parser::{
+    SourceFile,
+    ast::LinearTypeAst,
+};
+use mutica_compiler::{
+    grammar::TypeParser,
+    logos::Logos,
+    parser::{ParseContext, ast::LinearizeContext, lexer::LexerToken},
+};
+use mutica_semantic::semantic::SourceMapping;
 
 #[derive(Debug)]
 struct Backend {
     client: Client,
+    documents: RwLock<HashMap<Url, String>>,
 }
 
 #[tower_lsp::async_trait]
@@ -34,6 +47,24 @@ impl LanguageServer for Backend {
                     }),
                     file_operations: None,
                 }),
+                semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+                    SemanticTokensOptions {
+                        work_done_progress_options: Default::default(),
+                        legend: SemanticTokensLegend {
+                            token_types: vec![
+                                SemanticTokenType::VARIABLE,
+                                SemanticTokenType::FUNCTION,
+                                SemanticTokenType::TYPE,
+                                SemanticTokenType::KEYWORD,
+                                SemanticTokenType::STRING,
+                                SemanticTokenType::NUMBER,
+                            ],
+                            token_modifiers: vec![],
+                        },
+                        range: Some(false),
+                        full: Some(SemanticTokensFullOptions::Bool(true)),
+                    },
+                )),
                 ..ServerCapabilities::default()
             },
         })
@@ -49,7 +80,8 @@ impl LanguageServer for Backend {
         Ok(())
     }
 
-    async fn did_open(&self, _: DidOpenTextDocumentParams) {
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        self.documents.write().unwrap().insert(params.text_document.uri, params.text_document.text);
         self.client
             .log_message(MessageType::INFO, "file opened!")
             .await;
@@ -93,6 +125,107 @@ impl LanguageServer for Backend {
 
         Ok(None)
     }
+
+    async fn semantic_tokens_full(&self, params: SemanticTokensParams) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri;
+        if let Some(content) = self.documents.read().unwrap().get(&uri) {
+            let tokens = self.parse_and_generate_tokens(content)?;
+            Ok(Some(SemanticTokensResult::Tokens(tokens)))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl Backend {
+    fn parse_and_generate_tokens(&self, content: &str) -> Result<SemanticTokens> {
+        let source_file = Arc::new(SourceFile::new(None, content.into()));
+        let lexer = LexerToken::lexer(content);
+        let spanned_lexer = lexer.spanned().map(|(token_result, span)| {
+            let token = token_result?;
+            Ok((span.start, token, span.end))
+        });
+        let parser = TypeParser::new();
+        let parsed = parser.parse(&source_file, spanned_lexer);
+        match parsed {
+            Ok(ast) => {
+                let mut errors = Vec::new();
+                ast.collect_errors(&mut errors);
+                if !errors.is_empty() {
+                    return Ok(SemanticTokens { result_id: None, data: vec![] });
+                }
+                let basic = ast.into_basic(ast.location());
+                let linearized = basic.linearize(&mut LinearizeContext::new(), basic.location()).finalize();
+                let flow_result = linearized.flow(&mut ParseContext::new(), false, linearized.location());
+                let flowed = match &flow_result {
+                    Ok(result) => result.ty().clone(),
+                    Err(_) => return Ok(SemanticTokens { result_id: None, data: vec![] }),
+                };
+                let mapping = SourceMapping::from_ast(&flowed, &source_file);
+                // 生成tokens
+                let mut tokens = Vec::new();
+                let mut added_spans = std::collections::HashSet::new();
+                let mut last_line = 0;
+                let mut last_start = 0;
+                for node_opt in mapping.get_mapping().iter() {
+                    if let Some(node) = node_opt {
+                        if let Some(loc) = node.location() {
+                            let span = loc.span();
+                            let start = span.start;
+                            let end = span.end;
+                            if added_spans.insert((start, end)) {
+                                let length = end - start;
+                                // 计算行和列
+                                let before = &content[..start];
+                                let lines: Vec<&str> = before.split('\n').collect();
+                                let line = lines.len() - 1;
+                                let col = lines.last().unwrap().len();
+                                let delta_line = line as u32 - last_line;
+                                let delta_start = if delta_line == 0 { col as u32 - last_start } else { col as u32 };
+                                let token_type = self.ast_node_to_token_type(&node.value());
+                                tokens.push(SemanticToken {
+                                    delta_line,
+                                    delta_start,
+                                    length: length as u32,
+                                    token_type,
+                                    token_modifiers_bitset: 0,
+                                });
+                                last_line = line as u32;
+                                last_start = col as u32;
+                            }
+                        }
+                    }
+                }
+                // 排序tokens按位置
+                tokens.sort_by_key(|t| (t.delta_line, t.delta_start));
+                Ok(SemanticTokens { result_id: None, data: tokens })
+            }
+            Err(_) => Ok(SemanticTokens { result_id: None, data: vec![] }),
+        }
+    }
+
+    fn ast_node_to_token_type(&self, node: &LinearTypeAst) -> u32 {
+        match node {
+            LinearTypeAst::Variable(_) => 0, // VARIABLE
+            LinearTypeAst::Closure { .. } => 1, // FUNCTION
+            LinearTypeAst::Invoke { .. } => 1, // FUNCTION
+            LinearTypeAst::FixPoint { .. } => 1, // FUNCTION
+            LinearTypeAst::Int => 2, // TYPE
+            LinearTypeAst::Char => 2, // TYPE
+            LinearTypeAst::Top => 2, // TYPE
+            LinearTypeAst::Bottom => 2, // TYPE
+            LinearTypeAst::Tuple(_) => 2, // TYPE
+            LinearTypeAst::List(_) => 2, // TYPE
+            LinearTypeAst::Generalize(_) => 2, // TYPE
+            LinearTypeAst::Specialize(_) => 2, // TYPE
+            LinearTypeAst::Namespace { .. } => 2, // TYPE
+            LinearTypeAst::IntLiteral(_) => 5, // NUMBER
+            LinearTypeAst::CharLiteral(_) => 4, // STRING
+            LinearTypeAst::Literal(_) => 4, // STRING
+            LinearTypeAst::AtomicOpcode(_) => 3, // KEYWORD
+            LinearTypeAst::Pattern { .. } => 0, // VARIABLE
+        }
+    }
 }
 
 #[tokio::main]
@@ -100,6 +233,6 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| Backend { client });
+    let (service, socket) = LspService::new(|client| Backend { client, documents: RwLock::new(HashMap::new()) });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
