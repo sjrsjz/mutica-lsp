@@ -1,0 +1,4 @@
+{
+    "muticaLsp.serverPath": "${workspaceFolder}/target/release/mutica-lsp",
+    "muticaLsp.trace.server": "verbose"
+}

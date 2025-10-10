@@ -1,0 +1,63 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build LSP Server",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "build",
+                "--release"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Compile Extension",
+            "type": "shell",
+            "command": "pnpm",
+            "args": [
+                "run",
+                "compile"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build All",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Build LSP Server",
+                "Compile Extension"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "type": "shell",
+            "command": "pnpm",
+            "args": [
+                "run",
+                "compile"
+            ],
+            "group": "build",
+            "problemMatcher": [],
+            "label": "pnpm: compile",
+            "detail": "tsc -p ./"
+        }
+    ]
+}

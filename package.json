@@ -1,0 +1,70 @@
+{
+  "name": "mutica-lsp-client",
+  "displayName": "Mutica LSP Client",
+  "description": "A VS Code extension for Mutica language support",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "mutica",
+        "aliases": [
+          "Mutica",
+          "mutica"
+        ],
+        "extensions": [
+          ".mu"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "mutica",
+        "scopeName": "source.mutica",
+        "path": "./syntaxes/mutica.tmGrammar.json"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Mutica LSP",
+      "properties": {
+        "muticaLsp.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Mutica LSP server executable"
+        },
+        "muticaLsp.trace.server": {
+          "scope": "window",
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "pnpm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.95.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}
