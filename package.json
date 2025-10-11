@@ -3,6 +3,9 @@
   "displayName": "Mutica LSP Client",
   "description": "A VS Code extension for Mutica language support",
   "version": "0.1.0",
+  "author": {
+    "name": "sjrsjz"
+  },
   "engines": {
     "vscode": "^1.95.0"
   },

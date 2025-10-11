@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "mutica"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "clap",
  "mutica-compiler",
@@ -774,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "mutica-compiler"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "ariadne",
  "lalrpop",
@@ -786,7 +786,7 @@ dependencies = [
 
 [[package]]
 name = "mutica-core"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "rust-arc-gc",
  "smallvec",
@@ -808,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "mutica-semantic"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "mutica-compiler",
  "mutica-core",

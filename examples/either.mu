@@ -10,11 +10,10 @@ let map_right: any = either: (Left::any | Right::any) |-> f: any |->
         | panic;
 
 // 安全除法
-let safe_div: any = a: int |-> b: int |->
-    match b
-        | 0 => Left("Division by zero")
-        | b_val: int => Right(a / b_val)
-        | panic;
+let safe_div: any = a: int |-> match
+    | 0 => Left("Division by zero")
+    | b_val: int => Right(a / b_val)
+    | panic;
 
 // 链式操作
 let bind: any = either: (Left::any | Right::any) |-> f: any |->

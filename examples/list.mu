@@ -3,20 +3,16 @@ let Cons: any = head: any |-> tail: any |-> Cons::(head, tail);
 let Nil: any = Nil::();
 
 // 列表长度
-let length: any = 
-    rec len: list: (Nil::() | Cons::(any, any)) |->
-        match list
-            | Nil::() => 0
-            | Cons::(any, tail: any) => 1 + len(tail)
-            | panic;
+let length: any = rec len: match
+    | Nil::() => 0
+    | Cons::(any, tail: any) => 1 + len(tail)
+    | panic;
 
 // 列表求和
-let sum: any = 
-    rec s: list: (Nil::() | Cons::(int, any)) |->
-        match list
-            | Nil::() => 0
-            | Cons::(head: int, tail: any) => head + s(tail)
-            | panic;
+let sum: any = rec s: match
+    | Nil::() => 0
+    | Cons::(head: int, tail: any) => head + s(tail)
+    | panic;
 
 // 列表映射
 let map_list: any = 

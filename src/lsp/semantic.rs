@@ -91,154 +91,112 @@ pub async fn parse_and_generate_tokens(
                 .linearize(&mut LinearizeContext::new(), basic.location())
                 .finalize();
 
-            let flowed_result =
-                linearized.flow(&mut ParseContext::new(), false, linearized.location());
+            let mut errors = Vec::new();
+            let flowed_result = linearized.flow(
+                &mut ParseContext::new(),
+                false,
+                linearized.location(),
+                &mut errors,
+            );
+            let mut diagnostics: Vec<Diagnostic> = Vec::new();
 
-            let mut reference_table = Vec::new();
+            for e in errors {
+                let err_report = e.report();
+                let cache = (
+                    file_path.clone(),
+                    mutica::mutica_compiler::ariadne::Source::from(content),
+                );
+                let plain = report_to_plain_text(|buf: &mut Vec<u8>| err_report.write(cache, buf));
+                let _ = std::io::stderr().write_all(plain.as_bytes());
 
-            match flowed_result {
-                Ok(flowed) => {
-                    collect_references(flowed.ty(), content, &mut reference_table); // // 将引用表输出到 stderr，便于调试
-                    // if !reference_table.is_empty() {
-                    //     let mut out = String::new();
-                    //     for (use_range, def_range) in &reference_table {
-                    //         out.push_str(&format!(
-                    //             "{}:{}-{}:{} -> {}:{}-{}:{}\n",
-                    //             use_range.start.line,
-                    //             use_range.start.character,
-                    //             use_range.end.line,
-                    //             use_range.end.character,
-                    //             def_range.start.line,
-                    //             def_range.start.character,
-                    //             def_range.end.line,
-                    //             def_range.end.character
-                    //         ));
-                    //     }
-                    //     let _ = std::io::stderr().write_all(out.as_bytes());
-                    // }
-                }
-                Err(e) => {
-                    // 处理语义分析错误
-                    let err_report = e.report();
-                    let cache = (
-                        file_path.clone(),
-                        mutica::mutica_compiler::ariadne::Source::from(content),
-                    );
-                    let plain =
-                        report_to_plain_text(|buf: &mut Vec<u8>| err_report.write(cache, buf));
-                    let _ = std::io::stderr().write_all(plain.as_bytes());
-
-                    let mut diagnostics: Vec<Diagnostic> = Vec::new();
-
-                    match &e {
-                        ParseError::UseBeforeDeclaration(ast, name) => {
-                            if let Some(loc) = ast.location() {
-                                let span = loc.span().clone();
-                                let start = offset_to_position(content, span.start);
-                                let end = offset_to_position(content, span.end);
-                                let message = format!("Use of undeclared variable '{}'", name);
-                                diagnostics.push(Diagnostic {
-                                    range: Range { start, end },
-                                    severity: Some(DiagnosticSeverity::ERROR),
-                                    code: None,
-                                    code_description: None,
-                                    source: Some("mutica-lsp".to_string()),
-                                    message,
-                                    related_information: None,
-                                    tags: None,
-                                    data: None,
-                                });
-                            }
-                        }
-                        ParseError::RedeclaredPattern(ast, name) => {
-                            if let Some(loc) = name.location().or_else(|| ast.location()) {
-                                let span = loc.span().clone();
-                                let start = offset_to_position(content, span.start);
-                                let end = offset_to_position(content, span.end);
-                                let message =
-                                    format!("Redeclared pattern variable '{}'", name.value());
-                                diagnostics.push(Diagnostic {
-                                    range: Range { start, end },
-                                    severity: Some(DiagnosticSeverity::ERROR),
-                                    code: None,
-                                    code_description: None,
-                                    source: Some("mutica-lsp".to_string()),
-                                    message,
-                                    related_information: None,
-                                    tags: None,
-                                    data: None,
-                                });
-                            }
-                        }
-                        ParseError::UnusedVariable(_ast, names) => {
-                            for name_loc in names.iter() {
-                                if let Some(loc) = name_loc.location() {
-                                    let span = loc.span().clone();
-                                    let start = offset_to_position(content, span.start);
-                                    let end = offset_to_position(content, span.end);
-                                    let message = format!(
-                                        "Variable '{}' is declared but never used",
-                                        name_loc.value()
-                                    );
-                                    diagnostics.push(Diagnostic {
-                                        range: Range { start, end },
-                                        severity: Some(DiagnosticSeverity::WARNING),
-                                        code: None,
-                                        code_description: None,
-                                        source: Some("mutica-lsp".to_string()),
-                                        message: message.clone(),
-                                        related_information: None,
-                                        tags: None,
-                                        data: None,
-                                    });
-                                }
-                            }
-                        }
-                        ParseError::AmbiguousPattern(ast)
-                        | ParseError::PatternOutOfParameterDefinition(ast)
-                        | ParseError::MissingBranch(ast) => {
-                            if let Some(loc) = ast.location() {
-                                let span = loc.span().clone();
-                                let start = offset_to_position(content, span.start);
-                                let end = offset_to_position(content, span.end);
-                                let message = match perr_to_message(&e) {
-                                    Some(m) => m,
-                                    None => plain.clone(),
-                                };
-                                diagnostics.push(Diagnostic {
-                                    range: Range { start, end },
-                                    severity: Some(DiagnosticSeverity::ERROR),
-                                    code: None,
-                                    code_description: None,
-                                    source: Some("mutica-lsp".to_string()),
-                                    message,
-                                    related_information: None,
-                                    tags: None,
-                                    data: None,
-                                });
-                            }
-                        }
-                        ParseError::InternalError(msg) => {
-                            let start = Position {
-                                line: 0,
-                                character: 0,
-                            };
-                            let end = offset_to_position(content, content.len());
+                match &e {
+                    ParseError::UseBeforeDeclaration(ast, name) => {
+                        if let Some(loc) = ast.location() {
+                            let span = loc.span().clone();
+                            let start = offset_to_position(content, span.start);
+                            let end = offset_to_position(content, span.end);
+                            let message = format!("Use of undeclared variable '{}'", name);
                             diagnostics.push(Diagnostic {
                                 range: Range { start, end },
                                 severity: Some(DiagnosticSeverity::ERROR),
                                 code: None,
                                 code_description: None,
                                 source: Some("mutica-lsp".to_string()),
-                                message: msg.clone(),
+                                message,
                                 related_information: None,
                                 tags: None,
                                 data: None,
                             });
                         }
                     }
-
-                    if diagnostics.is_empty() {
+                    ParseError::RedeclaredPattern(ast, name) => {
+                        if let Some(loc) = name.location().or_else(|| ast.location()) {
+                            let span = loc.span().clone();
+                            let start = offset_to_position(content, span.start);
+                            let end = offset_to_position(content, span.end);
+                            let message = format!("Redeclared pattern variable '{}'", name.value());
+                            diagnostics.push(Diagnostic {
+                                range: Range { start, end },
+                                severity: Some(DiagnosticSeverity::ERROR),
+                                code: None,
+                                code_description: None,
+                                source: Some("mutica-lsp".to_string()),
+                                message,
+                                related_information: None,
+                                tags: None,
+                                data: None,
+                            });
+                        }
+                    }
+                    ParseError::UnusedVariable(_ast, names) => {
+                        for name_loc in names.iter() {
+                            if let Some(loc) = name_loc.location() {
+                                let span = loc.span().clone();
+                                let start = offset_to_position(content, span.start);
+                                let end = offset_to_position(content, span.end);
+                                let message = format!(
+                                    "Variable '{}' is declared but never used",
+                                    name_loc.value()
+                                );
+                                diagnostics.push(Diagnostic {
+                                    range: Range { start, end },
+                                    severity: Some(DiagnosticSeverity::WARNING),
+                                    code: None,
+                                    code_description: None,
+                                    source: Some("mutica-lsp".to_string()),
+                                    message: message.clone(),
+                                    related_information: None,
+                                    tags: None,
+                                    data: None,
+                                });
+                            }
+                        }
+                    }
+                    ParseError::AmbiguousPattern(ast)
+                    | ParseError::PatternOutOfParameterDefinition(ast)
+                    | ParseError::MissingBranch(ast) => {
+                        if let Some(loc) = ast.location() {
+                            let span = loc.span().clone();
+                            let start = offset_to_position(content, span.start);
+                            let end = offset_to_position(content, span.end);
+                            let message = match perr_to_message(&e) {
+                                Some(m) => m,
+                                None => plain.clone(),
+                            };
+                            diagnostics.push(Diagnostic {
+                                range: Range { start, end },
+                                severity: Some(DiagnosticSeverity::ERROR),
+                                code: None,
+                                code_description: None,
+                                source: Some("mutica-lsp".to_string()),
+                                message,
+                                related_information: None,
+                                tags: None,
+                                data: None,
+                            });
+                        }
+                    }
+                    ParseError::InternalError(msg) => {
                         let start = Position {
                             line: 0,
                             character: 0,
@@ -250,18 +208,40 @@ pub async fn parse_and_generate_tokens(
                             code: None,
                             code_description: None,
                             source: Some("mutica-lsp".to_string()),
-                            message: plain.clone(),
+                            message: msg.clone(),
                             related_information: None,
                             tags: None,
                             data: None,
                         });
                     }
+                }
 
-                    client
-                        .publish_diagnostics(uri.clone(), diagnostics, None)
-                        .await;
+                if diagnostics.is_empty() {
+                    let start = Position {
+                        line: 0,
+                        character: 0,
+                    };
+                    let end = offset_to_position(content, content.len());
+                    diagnostics.push(Diagnostic {
+                        range: Range { start, end },
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        code: None,
+                        code_description: None,
+                        source: Some("mutica-lsp".to_string()),
+                        message: plain.clone(),
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    });
                 }
             }
+
+            client
+                .publish_diagnostics(uri.clone(), diagnostics, None)
+                .await;
+            let mut reference_table = Vec::new();
+
+            collect_references(flowed_result.ty(), content, &mut reference_table); // // 将引用表输出到 stderr，便于调试
 
             let mapping = SourceMapping::from_ast(&linearized, &source_file);
 
