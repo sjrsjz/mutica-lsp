@@ -79,11 +79,7 @@ pub async fn parse_and_generate_tokens(
                     data: None,
                 });
             }
-
-            client
-                .publish_diagnostics(uri.clone(), diagnostics, None)
-                .await;
-
+            
             // 清理 AST 中的 ParseError 节点
             let sanitized_ast = sanitize_ast(ast);
             let basic = sanitized_ast.into_basic(sanitized_ast.location());
@@ -98,7 +94,6 @@ pub async fn parse_and_generate_tokens(
                 linearized.location(),
                 &mut errors,
             );
-            let mut diagnostics: Vec<Diagnostic> = Vec::new();
 
             for e in errors {
                 let err_report = e.report();

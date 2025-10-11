@@ -33,14 +33,12 @@ pub fn sanitize_ast<'input>(ast: WithLocation<TypeAst<'input>>) -> WithLocation<
         TypeAst::Match {
             value,
             match_branch,
-            else_branch,
         } => TypeAst::Match {
             value: value.map(|value| Box::new(sanitize_ast(*value))),
             match_branch: match_branch
                 .into_iter()
                 .map(|(pattern, expr)| (sanitize_ast(pattern), sanitize_ast(expr)))
                 .collect(),
-            else_branch: else_branch.map(|b| Box::new(sanitize_ast(*b))),
         },
         TypeAst::Closure {
             pattern,
