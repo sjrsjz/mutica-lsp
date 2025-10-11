@@ -21,6 +21,5 @@ src/**
 Cargo.toml
 Cargo.lock
 build.sh
-node_modules/**
 pnpm-lock.yaml
 *.vsix

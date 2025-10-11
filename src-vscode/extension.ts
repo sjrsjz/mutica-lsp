@@ -33,19 +33,6 @@ function findServerPath(context: ExtensionContext): string | undefined {
 
     // 尝试多个可能的位置
     const possiblePaths = [
-        // 1. 扩展安装目录中
-        path.join(context.extensionPath, 'target', 'release', 'mutica-lsp'),
-        path.join(context.extensionPath, 'target', 'debug', 'mutica-lsp'),
-
-        // 2. 工作区根目录中
-        ...(workspace.workspaceFolders?.map(folder =>
-            path.join(folder.uri.fsPath, 'target', 'release', 'mutica-lsp')
-        ) || []),
-        ...(workspace.workspaceFolders?.map(folder =>
-            path.join(folder.uri.fsPath, 'target', 'debug', 'mutica-lsp')
-        ) || []),
-
-        // 3. 假设在PATH中
         'mutica-lsp'
     ];
 
@@ -80,19 +67,6 @@ function findCompilerPath(context: ExtensionContext): string | undefined {
 
     // 尝试多个可能的位置
     const possiblePaths = [
-        // 1. 扩展安装目录的兄弟目录中
-        path.join(context.extensionPath, '..', 'Mutica', 'target', 'release', 'mutica'),
-        path.join(context.extensionPath, '..', 'Mutica', 'target', 'debug', 'mutica'),
-
-        // 2. 工作区根目录中
-        ...(workspace.workspaceFolders?.map(folder =>
-            path.join(folder.uri.fsPath, 'target', 'release', 'mutica')
-        ) || []),
-        ...(workspace.workspaceFolders?.map(folder =>
-            path.join(folder.uri.fsPath, 'target', 'debug', 'mutica')
-        ) || []),
-
-        // 3. 假设在PATH中
         'mutica'
     ];
 
