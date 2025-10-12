@@ -79,7 +79,7 @@ pub async fn parse_and_generate_tokens(
                     data: None,
                 });
             }
-            
+
             // 清理 AST 中的 ParseError 节点
             let sanitized_ast = sanitize_ast(ast);
             let basic = sanitized_ast.into_basic(sanitized_ast.location());
@@ -124,12 +124,12 @@ pub async fn parse_and_generate_tokens(
                             });
                         }
                     }
-                    ParseError::RedeclaredPattern(ast, name) => {
+                    ParseError::RedeclaredCaptureValue(ast, name) => {
                         if let Some(loc) = name.location().or_else(|| ast.location()) {
                             let span = loc.span().clone();
                             let start = offset_to_position(content, span.start);
                             let end = offset_to_position(content, span.end);
-                            let message = format!("Redeclared pattern variable '{}'", name.value());
+                            let message = format!("Redeclared capture variable '{}'", name.value());
                             diagnostics.push(Diagnostic {
                                 range: Range { start, end },
                                 severity: Some(DiagnosticSeverity::ERROR),

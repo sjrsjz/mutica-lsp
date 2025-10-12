@@ -4,9 +4,7 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
     let keywords = vec![
         "let",
         "perform",
-        "do",
         "with",
-        "as",
         "match",
         "rec",
         "panic",
@@ -25,8 +23,6 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "__is",
         "__opcode",
         "__continuation",
-        "input",
-        "print",
     ];
 
     let operators = vec![
@@ -34,6 +30,8 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         ">", ">=", "<:", "+", "-", "*", "/", "%", "=", ";", "#", "\\", "(", ")", "[", "]", "{",
         "}", "|>",
     ];
+
+    let functions = vec!["input!", "print!", "println!", "flush!"];
 
     let mut items = Vec::new();
 
@@ -49,6 +47,14 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         items.push(CompletionItem {
             label: op.to_string(),
             kind: Some(CompletionItemKind::OPERATOR),
+            ..Default::default()
+        });
+    }
+
+    for func in functions {
+        items.push(CompletionItem {
+            label: func.to_string(),
+            kind: Some(CompletionItemKind::FUNCTION),
             ..Default::default()
         });
     }

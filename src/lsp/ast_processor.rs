@@ -88,8 +88,8 @@ pub fn perr_to_message(err: &ParseError) -> Option<String> {
         ParseError::UseBeforeDeclaration(_, name) => {
             Some(format!("Use of undeclared variable '{}'", name))
         }
-        ParseError::RedeclaredPattern(_, name) => {
-            Some(format!("Redeclared pattern variable '{}'", name.value()))
+        ParseError::RedeclaredCaptureValue(_, name) => {
+            Some(format!("Redeclared capture variable '{}'", name.value()))
         }
         ParseError::UnusedVariable(_, names) => {
             let vars: Vec<String> = names.iter().map(|n| n.value().clone()).collect();
