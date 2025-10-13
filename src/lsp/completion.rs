@@ -15,6 +15,7 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "false",
         "any",
         "none",
+        "import",
         "__add",
         "__sub",
         "__mul",

@@ -120,6 +120,14 @@ impl LanguageServer for Backend {
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri.clone();
+        // chdir to uri's parent directory
+        std::env::set_current_dir(
+            uri.to_file_path()
+                .unwrap()
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(".")),
+        )
+        .unwrap_or(());
         if let Some(change) = params.content_changes.first() {
             self.documents
                 .write()
@@ -183,6 +191,13 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri;
+        std::env::set_current_dir(
+            uri.to_file_path()
+                .unwrap()
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(".")),
+        )
+        .unwrap_or(());
         let content = self.documents.read().unwrap().get(&uri).cloned();
         if let Some(content) = content {
             let result = parse_and_generate_tokens(&content, &uri, &self.client).await?;
