@@ -110,59 +110,90 @@ pub async fn parse_and_generate_tokens(
         );
 
         for e in semantic_errors {
+            let file_path = e
+                .location()
+                .map(|loc| loc.source().filepath())
+                .unwrap_or_else(|| file_path.to_string_lossy().to_string());
+            let content = e
+                .location()
+                .map(|loc| loc.source().content())
+                .unwrap_or(content);
             let err_report = e.report();
             // Note: semantic errors are reported against the main file's content
             let cache = (
-                file_path.to_string_lossy().to_string(),
+                file_path,
                 mutica::mutica_compiler::ariadne::Source::from(content),
             );
             let plain = report_to_plain_text(|buf: &mut Vec<u8>| err_report.write(cache, buf));
 
-            let (range, message, severity) = match &e {
-                ParseError::UseBeforeDeclaration(ast, name) => ast
-                    .location()
-                    .map(|loc| {
-                        let span = loc.span();
-                        let start = offset_to_position(content, span.start);
-                        let end = offset_to_position(content, span.end);
-                        (
-                            Range { start, end },
+            let mut error_items = Vec::new();
+            match e.value() {
+                ParseError::UseBeforeDeclaration(ast, name) => {
+                    if ast.location().is_none()
+                        || ast.location().unwrap().source() != source.as_ref()
+                    {
+                        continue;
+                    }
+                    let item = ast
+                        .location()
+                        .map(|loc| {
+                            let span = loc.span();
+                            let start = offset_to_position(content, span.start);
+                            let end = offset_to_position(content, span.end);
+                            (
+                                Range { start, end },
+                                format!("Use of undeclared variable '{}'", name),
+                                DiagnosticSeverity::ERROR,
+                            )
+                        })
+                        .unwrap_or((
+                            Range {
+                                start: Position::new(0, 0),
+                                end: offset_to_position(content, content.len()),
+                            },
                             format!("Use of undeclared variable '{}'", name),
                             DiagnosticSeverity::ERROR,
-                        )
-                    })
-                    .unwrap_or((
-                        Range {
-                            start: Position::new(0, 0),
-                            end: offset_to_position(content, content.len()),
-                        },
-                        format!("Use of undeclared variable '{}'", name),
-                        DiagnosticSeverity::ERROR,
-                    )),
-                ParseError::RedeclaredCaptureValue(ast, name) => name
-                    .location()
-                    .or_else(|| ast.location())
-                    .map(|loc| {
-                        let span = loc.span();
-                        let start = offset_to_position(content, span.start);
-                        let end = offset_to_position(content, span.end);
-                        (
-                            Range { start, end },
-                            format!("Redeclared capture variable '{}'", name.value()),
+                        ));
+                    error_items.push(item);
+                }
+                ParseError::RedeclaredCaptureValue(ast, name) => {
+                    if ast.location().is_none()
+                        || ast.location().unwrap().source() != source.as_ref()
+                    {
+                        continue;
+                    }
+                    let item = name
+                        .location()
+                        .or_else(|| ast.location())
+                        .map(|loc| {
+                            let span = loc.span();
+                            let start = offset_to_position(content, span.start);
+                            let end = offset_to_position(content, span.end);
+                            (
+                                Range { start, end },
+                                format!("Redeclared capture variable '{}'", name.value()),
+                                DiagnosticSeverity::ERROR,
+                            )
+                        })
+                        .unwrap_or((
+                            Range {
+                                start: Position::new(0, 0),
+                                end: offset_to_position(content, content.len()),
+                            },
+                            "Redeclared capture variable".to_string(),
                             DiagnosticSeverity::ERROR,
-                        )
-                    })
-                    .unwrap_or((
-                        Range {
-                            start: Position::new(0, 0),
-                            end: offset_to_position(content, content.len()),
-                        },
-                        "Redeclared capture variable".to_string(),
-                        DiagnosticSeverity::ERROR,
-                    )),
+                        ));
+                    error_items.push(item);
+                }
                 ParseError::UnusedVariable(_, names) => {
-                    if let Some(name_loc) = names.iter().next() {
-                        name_loc
+                    for name_loc in names {
+                        if name_loc.location().is_none()
+                            || name_loc.location().unwrap().source() != source.as_ref()
+                        {
+                            continue;
+                        }
+
+                        let item = name_loc
                             .location()
                             .map(|loc| {
                                 let span = loc.span();
@@ -184,43 +215,57 @@ pub async fn parse_and_generate_tokens(
                                 },
                                 "Variable is declared but never used".to_string(),
                                 DiagnosticSeverity::WARNING,
-                            ))
-                    } else {
-                        continue;
+                            ));
+                        error_items.push(item);
                     }
                 }
                 ParseError::AmbiguousPattern(ast)
                 | ParseError::PatternOutOfParameterDefinition(ast)
-                | ParseError::MissingBranch(ast) => ast
-                    .location()
-                    .map(|loc| {
-                        let span = loc.span();
-                        let start = offset_to_position(content, span.start);
-                        let end = offset_to_position(content, span.end);
-                        let msg = perr_to_message(&e).unwrap_or_else(|| plain.clone());
-                        (Range { start, end }, msg, DiagnosticSeverity::ERROR)
-                    })
-                    .unwrap_or((
-                        Range {
-                            start: Position::new(0, 0),
-                            end: offset_to_position(content, content.len()),
-                        },
-                        plain.clone(),
-                        DiagnosticSeverity::ERROR,
-                    )),
+                | ParseError::MissingBranch(ast) => {
+                    if ast.location().is_none()
+                        || ast.location().unwrap().source() != source.as_ref()
+                    {
+                        continue;
+                    }
+                    let item = ast
+                        .location()
+                        .map(|loc| {
+                            let span = loc.span();
+                            let start = offset_to_position(content, span.start);
+                            let end = offset_to_position(content, span.end);
+                            let msg = perr_to_message(&e).unwrap_or_else(|| plain.clone());
+                            (Range { start, end }, msg, DiagnosticSeverity::ERROR)
+                        })
+                        .unwrap_or((
+                            Range {
+                                start: Position::new(0, 0),
+                                end: offset_to_position(content, content.len()),
+                            },
+                            plain.clone(),
+                            DiagnosticSeverity::ERROR,
+                        ));
+                    error_items.push(item);
+                }
                 ParseError::InternalError(msg) => {
                     let start = Position::new(0, 0);
                     let end = offset_to_position(content, content.len());
-                    (Range { start, end }, msg.clone(), DiagnosticSeverity::ERROR)
+                    error_items.push((
+                        Range { start, end },
+                        msg.clone(),
+                        DiagnosticSeverity::ERROR,
+                    ));
                 }
-            };
-            diagnostics.push(Diagnostic {
-                range,
-                severity: Some(severity),
-                source: Some("mutica-lsp".to_string()),
-                message,
-                ..Default::default()
-            });
+            }
+
+            for (range, message, severity) in error_items {
+                diagnostics.push(Diagnostic {
+                    range,
+                    severity: Some(severity),
+                    source: Some("mutica-lsp".to_string()),
+                    message,
+                    ..Default::default()
+                });
+            }
         }
 
         client
