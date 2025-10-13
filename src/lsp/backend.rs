@@ -14,6 +14,7 @@ pub struct Backend {
     pub documents: RwLock<HashMap<Url, String>>,
     pub last_tokens: RwLock<HashMap<Url, SemanticTokens>>,
     pub reference_table: RwLock<HashMap<Url, Vec<(Range, Range)>>>,
+    pub variable_maps: RwLock<HashMap<Url, Vec<Option<Vec<String>>>>>,
 }
 
 #[tower_lsp::async_trait]
@@ -136,7 +137,7 @@ impl LanguageServer for Backend {
 
             // 先尝试解析，只有成功时才触发 semantic_tokens_refresh
             let result = parse_and_generate_tokens(&change.text, &uri, &self.client).await;
-            if let Ok((Some(tokens), reference_table)) = result {
+            if let Ok((Some(tokens), reference_table, variable_map_opt)) = result {
                 // 解析成功，缓存 tokens 和引用表
                 self.last_tokens
                     .write()
@@ -146,6 +147,12 @@ impl LanguageServer for Backend {
                     .write()
                     .unwrap()
                     .insert(uri.clone(), reference_table);
+                if let Some(variable_map) = variable_map_opt {
+                    self.variable_maps
+                        .write()
+                        .unwrap()
+                        .insert(uri.clone(), variable_map);
+                }
                 let _ = self.client.semantic_tokens_refresh().await;
             }
         }
@@ -167,8 +174,23 @@ impl LanguageServer for Backend {
             .await;
     }
 
-    async fn completion(&self, _: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let items = crate::lsp::completion::get_completion_items();
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let mut items = crate::lsp::completion::get_completion_items();
+
+        // 获取位置信息
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        // 从变量映射获取变量补全
+        if let Some(variable_items) = crate::lsp::completion::get_variable_completions(
+            &uri,
+            position,
+            &self.documents,
+            &self.variable_maps,
+        ) {
+            items.extend(variable_items);
+        }
+
         Ok(Some(CompletionResponse::Array(items)))
     }
 
@@ -201,7 +223,7 @@ impl LanguageServer for Backend {
         let content = self.documents.read().unwrap().get(&uri).cloned();
         if let Some(content) = content {
             let result = parse_and_generate_tokens(&content, &uri, &self.client).await?;
-            if let (Some(tokens), reference_table) = result {
+            if let (Some(tokens), reference_table, variable_map_opt) = result {
                 self.last_tokens
                     .write()
                     .unwrap()
@@ -209,7 +231,13 @@ impl LanguageServer for Backend {
                 self.reference_table
                     .write()
                     .unwrap()
-                    .insert(uri, reference_table);
+                    .insert(uri.clone(), reference_table);
+                if let Some(variable_map) = variable_map_opt {
+                    self.variable_maps
+                        .write()
+                        .unwrap()
+                        .insert(uri.clone(), variable_map);
+                }
                 Ok(Some(SemanticTokensResult::Tokens(tokens)))
             } else {
                 if let Some(cached) = self.last_tokens.read().unwrap().get(&uri).cloned() {

@@ -17,12 +17,12 @@ use crate::lsp::ast_processor::perr_to_message;
 use crate::lsp::references::collect_references;
 use crate::lsp::utils::{offset_to_position, report_to_plain_text};
 
-/// 解析文档并生成语义tokens，同时收集引用表
+/// 解析文档并生成语义tokens,同时收集引用表和变量上下文映射
 pub async fn parse_and_generate_tokens(
     content: &str,
     uri: &Url,
     client: &Client,
-) -> Result<(Option<SemanticTokens>, Vec<(Range, Range)>)> {
+) -> Result<(Option<SemanticTokens>, Vec<(Range, Range)>, Option<Vec<Option<Vec<String>>>>)> {
     let file_path = if let Ok(path) = uri.to_file_path() {
         path
     } else {
@@ -277,7 +277,25 @@ pub async fn parse_and_generate_tokens(
         collect_references(flowed_result.ty(), &mut reference_table, source.as_ref());
 
         let source_file = Arc::new(SourceFile::new(Some(file_path), content.to_string()));
-        let mapping = SourceMapping::from_ast(&linearized, &source_file);
+        let mapping = SourceMapping::from_ast(flowed_result.ty(), &source_file);
+
+        // 提取变量上下文映射：用 Vec 按字节偏移存储变量列表
+        let content_len = content.len();
+        let mut variable_vec: Vec<Option<Vec<String>>> = vec![None; content_len];
+        
+        for (offset, node_opt) in mapping.mapping().iter().enumerate() {
+            if let Some(node) = node_opt {
+                let variables: Vec<String> = node
+                    .payload()
+                    .variable_context()
+                    .iter()
+                    .map(|v| v.value().clone())
+                    .collect();
+                if !variables.is_empty() {
+                    variable_vec[offset] = Some(variables);
+                }
+            }
+        }
 
         let mut tokens = Vec::new();
         let mut last_line = 0u32;
@@ -355,13 +373,14 @@ pub async fn parse_and_generate_tokens(
                 data: tokens,
             }),
             reference_table,
+            Some(variable_vec),
         ))
     } else {
-        // 如果构建失败，发送诊断信息并提前返回
+        // 如果构建失败,发送诊断信息并提前返回
         client
             .publish_diagnostics(uri.clone(), diagnostics, None)
             .await;
-        Ok((None, Vec::new()))
+        Ok((None, Vec::new(), None))
     }
 }
 

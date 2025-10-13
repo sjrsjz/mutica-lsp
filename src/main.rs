@@ -15,6 +15,7 @@ async fn main() {
         documents: RwLock::new(HashMap::new()),
         last_tokens: RwLock::new(HashMap::new()),
         reference_table: RwLock::new(HashMap::new()),
+        variable_maps: RwLock::new(HashMap::new()),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
