@@ -12,85 +12,54 @@ import {
 let client: LanguageClient;
 let muticaTerminal: any | undefined;
 
-function findServerPath(context: ExtensionContext): string | undefined {
-    const config = workspace.getConfiguration('muticaLsp');
-    let serverPath = config.get<string>('serverPath');
-
-    // 如果用户配置了路径
-    if (serverPath) {
-        // 如果包含路径分隔符，检查文件是否存在
-        if (serverPath.includes(path.sep) || serverPath.includes('/')) {
-            if (fs.existsSync(serverPath)) {
-                return serverPath;
-            } else {
-                window.showWarningMessage(`Configured Mutica LSP server path does not exist: ${serverPath}`);
-            }
-        } else {
-            // 假设是命令名，直接返回
-            return serverPath;
-        }
-    }
-
-    // 尝试多个可能的位置
-    const possiblePaths = [
-        'mutica-lsp'
-    ];
-
-    // 查找第一个存在的路径，或返回'mutica-lsp'如果在PATH中
-    for (const p of possiblePaths) {
-        if (p === 'mutica-lsp' || fs.existsSync(p)) {
-            return p;
-        }
-    }
-
-    return undefined;
+/**
+ * 获取可执行文件的平台特定名称
+ * 在 Windows 上添加 .exe 扩展名
+ */
+function getExecutableName(baseName: string): string {
+    return process.platform === 'win32' ? `${baseName}.exe` : baseName;
 }
 
-function findCompilerPath(context: ExtensionContext): string | undefined {
-    const config = workspace.getConfiguration('muticaLsp');
-    let compilerPath = config.get<string>('compilerPath');
+/**
+ * 获取 LSP 服务器的路径
+ */
+function getServerPath(context: ExtensionContext): string {
+    const execName = getExecutableName('mutica-lsp');
+    return path.join(context.extensionPath, 'bin', execName);
+}
 
-    // 如果用户配置了路径
-    if (compilerPath) {
-        // 如果包含路径分隔符，检查文件是否存在
-        if (compilerPath.includes(path.sep) || compilerPath.includes('/')) {
-            if (fs.existsSync(compilerPath)) {
-                return compilerPath;
-            } else {
-                window.showWarningMessage(`Configured Mutica compiler path does not exist: ${compilerPath}`);
-            }
-        } else {
-            // 假设是命令名，直接返回
-            return compilerPath;
-        }
+/**
+ * 获取 Mutica 编译器的路径（从 PATH 或 cargo 安装位置）
+ */
+function getCompilerPath(): string | undefined {
+    const execName = getExecutableName('mutica');
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    
+    // 尝试从 cargo 安装位置查找
+    const cargoPath = path.join(homeDir, '.cargo', 'bin', execName);
+    if (fs.existsSync(cargoPath)) {
+        return cargoPath;
     }
-
-    // 尝试多个可能的位置
-    const possiblePaths = [
-        'mutica'
-    ];
-
-    // 查找第一个存在的路径，或返回'mutica'如果在PATH中
-    for (const p of possiblePaths) {
-        if (p === 'mutica' || fs.existsSync(p)) {
-            return p;
-        }
-    }
-
-    return undefined;
+    
+    // 假设在 PATH 中
+    return execName;
 }
 
 export function activate(context: ExtensionContext) {
-    // 查找服务器可执行文件路径
-    const serverPath = findServerPath(context);
+    // 获取服务器可执行文件路径（打包在扩展中）
+    const serverPath = getServerPath(context);
 
-    if (!serverPath) {
+    // 检查文件是否存在
+    if (!fs.existsSync(serverPath)) {
         window.showErrorMessage(
-            'Mutica LSP server not found. Please build it using "cargo build --release" ' +
-            'or configure the path in settings (muticaLsp.serverPath).'
+            'Mutica LSP server not found in extension bundle. ' +
+            'Please reinstall the extension or report this issue.'
         );
         return;
     }
+
+    // 输出日志用于调试
+    console.log(`Mutica LSP: Using server path: ${serverPath}`);
 
     // 服务器选项
     const serverOptions: ServerOptions = {
@@ -116,7 +85,7 @@ export function activate(context: ExtensionContext) {
             await activeEditor.document.save();
 
             const filePath = activeEditor.document.uri.fsPath;
-            const compilerPath = findCompilerPath(context);
+            const compilerPath = getCompilerPath();
             if (compilerPath) {
                 // 复用或创建终端
                 if (!muticaTerminal || muticaTerminal.exitStatus !== undefined) {
@@ -131,7 +100,8 @@ export function activate(context: ExtensionContext) {
                 muticaTerminal.show();
             } else {
                 window.showErrorMessage(
-                    'Mutica compiler not found. Please configure the path in settings (muticaLsp.compilerPath).'
+                    'Mutica compiler not found. Please install it using "cargo install --path ." ' +
+                    'or ensure it is in your PATH.'
                 );
             }
         } else {

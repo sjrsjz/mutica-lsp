@@ -58,11 +58,6 @@
       "type": "object",
       "title": "Mutica LSP",
       "properties": {
-        "muticaLsp.serverPath": {
-          "type": "string",
-          "default": "mutica-lsp",
-          "description": "Path to the Mutica LSP server executable"
-        },
         "muticaLsp.compilerPath": {
           "type": "string",
           "default": "mutica",
@@ -85,7 +80,8 @@
   "scripts": {
     "vscode:prepublish": "pnpm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "package": "./package.sh"
   },
   "devDependencies": {
     "@types/vscode": "^1.95.0",

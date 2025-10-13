@@ -1,3 +1,5 @@
 {
-    "muticaLsp.trace.server": "verbose"
+    "muticaLsp.trace.server": "verbose",
+    "muticaLsp.serverPath": "/home/sjz1/.cargo/bin/mutica-lsp",
+    "muticaLsp.compilerPath": "/home/sjz1/.cargo/bin/mutica"
 }
