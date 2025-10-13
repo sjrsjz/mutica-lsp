@@ -7,6 +7,7 @@
     "name": "sjrsjz"
   },
   "license": "MIT",
+  "packageManager": "pnpm@10.16.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/sjrsjz/mutica-lsp.git"
