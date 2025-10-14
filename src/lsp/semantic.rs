@@ -1,8 +1,6 @@
 use mutica::mutica_compiler::parser::{
     MultiFileBuilder, MultiFileBuilderError, ParseContext, ParseError, SourceFile, SyntaxError,
-    WithLocation,
-    ast::{BasicTypeAst, LinearTypeAst, LinearizeContext},
-    calculate_full_error_span, report_error_recovery,
+    ast::LinearizeContext, calculate_full_error_span, colorize::TokenColor, report_error_recovery,
 };
 use mutica::mutica_core::util::cycle_detector::FastCycleDetector;
 use mutica::mutica_semantic::semantic::SourceMapping;
@@ -22,7 +20,11 @@ pub async fn parse_and_generate_tokens(
     content: &str,
     uri: &Url,
     client: &Client,
-) -> Result<(Option<SemanticTokens>, Vec<(Range, Range)>, Option<Vec<Option<Vec<String>>>>)> {
+) -> Result<(
+    Option<SemanticTokens>,
+    Vec<(Range, Range)>,
+    Option<Vec<Option<Vec<String>>>>,
+)> {
     let file_path = if let Ok(path) = uri.to_file_path() {
         path
     } else {
@@ -30,9 +32,9 @@ pub async fn parse_and_generate_tokens(
     };
 
     // 1. 使用 MultiFileBuilder 构建 BasicTypeAst
-    let mut imported_ast: HashMap<PathBuf, WithLocation<BasicTypeAst>> = HashMap::new();
+    let mut imported_ast = HashMap::new();
     let mut path_detector = FastCycleDetector::new();
-    let mut builder_errors: Vec<WithLocation<MultiFileBuilderError>> = Vec::new();
+    let mut builder_errors = Vec::new();
 
     let mut builder =
         MultiFileBuilder::new(&mut imported_ast, &mut path_detector, &mut builder_errors);
@@ -98,7 +100,8 @@ pub async fn parse_and_generate_tokens(
     if let Some(basic_ast) = basic_ast_option {
         // 4. 语义分析和后续处理
         let linearized = basic_ast
-            .linearize(&mut LinearizeContext::new(), basic_ast.location())
+            .0
+            .linearize(&mut LinearizeContext::new(), basic_ast.0.location())
             .finalize();
 
         let mut semantic_errors = Vec::new();
@@ -282,7 +285,7 @@ pub async fn parse_and_generate_tokens(
         // 提取变量上下文映射：用 Vec 按字节偏移存储变量列表
         let content_len = content.len();
         let mut variable_vec: Vec<Option<Vec<String>>> = vec![None; content_len];
-        
+
         for (offset, node_opt) in mapping.mapping().iter().enumerate() {
             if let Some(node) = node_opt {
                 let variables: Vec<String> = node
@@ -312,11 +315,11 @@ pub async fn parse_and_generate_tokens(
             let mut current_type: Option<u32> = None;
 
             for i in line_start..line_end {
-                let ty = mapping
-                    .mapping()
+                let ty = basic_ast
+                    .1
+                    .color_mapping()
                     .get(i)
-                    .and_then(|node_opt| node_opt.as_ref())
-                    .map(|node| ast_node_to_token_type(&node.value()))
+                    .map(|node| color_to_token_type(node))
                     .unwrap_or(17); // Default token type
 
                 if current_type != Some(ty) {
@@ -384,25 +387,25 @@ pub async fn parse_and_generate_tokens(
     }
 }
 
-fn ast_node_to_token_type(node: &LinearTypeAst) -> u32 {
-    match node {
-        LinearTypeAst::Variable(_) => 8,
-        LinearTypeAst::Pattern { .. } => 10,
-        LinearTypeAst::Closure { .. } => 12,
-        LinearTypeAst::Invoke { .. } => 11,
-        LinearTypeAst::FixPoint { .. } => 12,
-        LinearTypeAst::Int => 1,
-        LinearTypeAst::Char => 1,
-        LinearTypeAst::Top => 1,
-        LinearTypeAst::Bottom => 1,
-        LinearTypeAst::Tuple(_) => 5,
-        LinearTypeAst::List(_) => 5,
-        LinearTypeAst::Generalize(_) => 6,
-        LinearTypeAst::Specialize(_) => 6,
-        LinearTypeAst::Namespace { .. } => 0,
-        LinearTypeAst::IntLiteral(_) => 19,
-        LinearTypeAst::CharLiteral(_) => 18,
-        LinearTypeAst::Literal(_) => 18,
-        LinearTypeAst::AtomicOpcode(_) => 15,
+fn color_to_token_type(color: &TokenColor) -> u32 {
+    match color {
+        TokenColor::UnSpecified => 17, // Default token type as Comment
+        TokenColor::Keyword => 15,     // KEYWORD
+        TokenColor::Identifier => 8,   // VARIABLE
+        TokenColor::Declaration => 8,  // VARIABLE (with declaration modifier)
+        TokenColor::Namespace => 0,    // NAMESPACE
+        TokenColor::Literal => 10,     // ENUM_MEMBER
+        TokenColor::Operator => 21,    // OPERATOR
+        TokenColor::Comment => 17,     // COMMENT
+        TokenColor::Whitespace => 17,  // COMMENT (as default/fallback)
+        TokenColor::Punctuation => 21, // OPERATOR (punctuation treated as operator)
+        TokenColor::Function => 12,    // FUNCTION
+        TokenColor::Type => 1,         // TYPE
+        TokenColor::Attribute => 9,    // PROPERTY
+        TokenColor::Macro => 14,       // MACRO
+        TokenColor::Number => 19,      // NUMBER
+        TokenColor::String => 18,      // STRING
+        TokenColor::Boolean => 15,     // KEYWORD (boolean as keyword)
+        TokenColor::Error => 17,       // COMMENT (error as fallback)
     }
 }
