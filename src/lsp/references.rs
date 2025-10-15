@@ -73,7 +73,9 @@ pub fn collect_references<'ast>(
         } => {
             collect_references(func, table, source_file);
             collect_references(arg, table, source_file);
-            collect_references(continuation, table, source_file);
+            if let Some(continuation) = continuation {
+                collect_references(continuation, table, source_file);
+            }
         }
         LinearTypeAst::Pattern { expr, .. } => {
             collect_references(expr, table, source_file);
