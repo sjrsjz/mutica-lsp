@@ -25,7 +25,6 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "__mod",
         "__is",
         "__opcode",
-        "__continuation",
     ];
 
     let operators = vec![
