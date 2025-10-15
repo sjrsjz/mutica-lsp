@@ -24,6 +24,8 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "__div",
         "__mod",
         "__is",
+        "__greater",
+        "__less",
         "__opcode",
     ];
 
