@@ -9,6 +9,7 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "with",
         "match",
         "rec",
+        "loop",
         "panic",
         "discard",
         "int",
