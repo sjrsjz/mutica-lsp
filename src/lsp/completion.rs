@@ -22,6 +22,8 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "if",
         "then",
         "else",
+        "rot",
+        "require",
         "__add",
         "__sub",
         "__mul",
@@ -36,7 +38,7 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
     let operators = vec![
         "->", "|->", "=>", "::", ".", "@", "|", "!", ":", "~", ",", "&", "==", "!=", "<", "<=",
         ">", ">=", "<:", "+", "-", "*", "/", "%", "=", ";", "#", "\\", "(", ")", "[", "]", "{",
-        "}", "|>",
+        "}", "|>", "..",
     ];
 
     let functions = vec!["input!", "print!", "println!", "flush!"];
