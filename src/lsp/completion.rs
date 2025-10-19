@@ -5,7 +5,6 @@ use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Position, Url};
 pub fn get_completion_items() -> Vec<CompletionItem> {
     let keywords = vec![
         "let",
-        "perform",
         "with",
         "match",
         "rec",
@@ -24,6 +23,7 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "else",
         "rot",
         "require",
+        "handle",
         "__add",
         "__sub",
         "__mul",
@@ -41,7 +41,9 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "}", "|>", "..",
     ];
 
-    let functions = vec!["input!", "print!", "println!", "flush!"];
+    let functions = vec![
+        "input!", "print!", "println!", "flush!", "repr", "display", "perform",
+    ];
 
     let mut items = Vec::new();
 
