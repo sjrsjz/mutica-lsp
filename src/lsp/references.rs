@@ -54,16 +54,10 @@ pub fn collect_references<'ast>(
                 collect_references(item, table, source_file);
             }
         }
-        LinearTypeAst::Closure {
-            pattern,
-            body,
-            fail_branch,
-            ..
-        } => {
-            collect_references(pattern, table, source_file);
-            collect_references(body, table, source_file);
-            if let Some(fail) = fail_branch {
-                collect_references(fail, table, source_file);
+        LinearTypeAst::Match { branches, .. } => {
+            for (pattern, expr) in branches {
+                collect_references(pattern, table, source_file);
+                collect_references(expr, table, source_file);
             }
         }
         LinearTypeAst::Invoke {
