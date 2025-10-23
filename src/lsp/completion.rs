@@ -22,7 +22,6 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "then",
         "else",
         "rot",
-        "require",
         "handle",
         "__add",
         "__sub",
@@ -43,7 +42,7 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
 
     let functions = vec![
         "input!", "print!", "println!", "flush!", "repr!", "display!", "perform!", "break!",
-        "resume!",
+        "resume!", "alloc!", "dealloc!", "set!", "get!",
     ];
 
     let mut items = Vec::new();
