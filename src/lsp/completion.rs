@@ -122,38 +122,26 @@ pub fn get_variable_completions(
 /// 将 Position 转换为字节偏移
 fn position_to_offset(content: &str, position: Position) -> Option<usize> {
     let mut byte_offset = 0;
-    let mut current_line = 0;
 
-    for line in content.split('\n') {
+    for (current_line, line) in content.split('\n').enumerate() {
         if current_line == position.line as usize {
             // 找到目标行，计算列偏移
-            let mut char_count = 0;
-            let mut col_offset = 0;
+            let desired = position.character as usize;
 
-            for (i, _) in line.char_indices() {
-                if char_count >= position.character as usize {
-                    break;
-                }
-                char_count += 1;
-                col_offset = i;
-            }
-
-            // 如果字符数正好等于，需要指向下一个位置
-            if char_count == position.character as usize && char_count < line.chars().count() {
-                col_offset = line
-                    .char_indices()
-                    .nth(char_count)
+            // 如果 desired 为 0，则在行首；否则尝试取第 desired 个字符的字节索引，超出则为行尾
+            let col_offset = if desired == 0 {
+                0
+            } else {
+                line.char_indices()
+                    .nth(desired)
                     .map(|(i, _)| i)
-                    .unwrap_or(line.len());
-            } else if char_count < position.character as usize {
-                col_offset = line.len();
-            }
+                    .unwrap_or(line.len())
+            };
 
             return Some(byte_offset + col_offset);
         }
 
         byte_offset += line.len() + 1; // +1 for '\n'
-        current_line += 1;
     }
 
     None

@@ -6,13 +6,11 @@ pub fn strip_ansi(s: &str) -> String {
     let mut chars = s.chars();
     while let Some(c) = chars.next() {
         if c == '\x1b' {
-            if let Some(next) = chars.next() {
-                if next == '[' {
-                    // consume until a final byte in range '@'..='~'
-                    while let Some(n) = chars.next() {
-                        if ('@'..='~').contains(&n) {
-                            break;
-                        }
+            if let Some('[') = chars.next() {
+                // consume until a final byte in range '@'..='~'
+                for n in chars.by_ref() {
+                    if ('@'..='~').contains(&n) {
+                        break;
                     }
                 }
             }

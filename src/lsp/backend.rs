@@ -239,12 +239,10 @@ impl LanguageServer for Backend {
                         .insert(uri.clone(), variable_map);
                 }
                 Ok(Some(SemanticTokensResult::Tokens(tokens)))
+            } else if let Some(cached) = self.last_tokens.read().unwrap().get(&uri).cloned() {
+                Ok(Some(SemanticTokensResult::Tokens(cached)))
             } else {
-                if let Some(cached) = self.last_tokens.read().unwrap().get(&uri).cloned() {
-                    Ok(Some(SemanticTokensResult::Tokens(cached)))
-                } else {
-                    Ok(None)
-                }
+                Ok(None)
             }
         } else {
             Ok(None)

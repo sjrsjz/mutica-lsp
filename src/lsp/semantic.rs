@@ -50,8 +50,11 @@ pub async fn parse_and_generate_tokens(
 
             let (range, message) = match builder_error.value() {
                 MultiFileBuilderError::SyntaxError(e) => {
-                    let report =
-                        SyntaxError::new(e.clone()).report(error_file_path.clone(), error_content, None);
+                    let report = SyntaxError::new(e.clone()).report(
+                        error_file_path.clone(),
+                        error_content,
+                        None,
+                    );
                     let cache = (
                         error_file_path,
                         mutica::mutica_compiler::ariadne::Source::from(error_content),
@@ -330,7 +333,7 @@ pub async fn parse_and_generate_tokens(
                     .1
                     .color_mapping()
                     .get(abs_byte)
-                    .map(|node| color_to_token_type(node))
+                    .map(color_to_token_type)
                     .unwrap_or(17);
 
                 // number of UTF-16 code units for this char
@@ -368,8 +371,8 @@ pub async fn parse_and_generate_tokens(
             }
 
             // flush remaining run at end of line
-            if let Some(typ) = current_type {
-                if run_utf16_len > 0 {
+            match current_type {
+                Some(typ) if run_utf16_len > 0 => {
                     let delta_line = line_num as u32 - last_line;
                     let delta_start = if delta_line == 0 {
                         run_start_utf16_col.saturating_sub(last_start)
@@ -386,6 +389,7 @@ pub async fn parse_and_generate_tokens(
                     last_line = line_num as u32;
                     last_start = run_start_utf16_col;
                 }
+                _ => {}
             }
 
             byte_offset = line_end + 1;
