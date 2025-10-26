@@ -51,7 +51,7 @@ pub async fn parse_and_generate_tokens(
             let (range, message) = match builder_error.value() {
                 MultiFileBuilderError::SyntaxError(e) => {
                     let report =
-                        SyntaxError::new(e.clone()).report(error_file_path.clone(), error_content);
+                        SyntaxError::new(e.clone()).report(error_file_path.clone(), error_content, None);
                     let cache = (
                         error_file_path,
                         mutica::mutica_compiler::ariadne::Source::from(error_content),
@@ -68,9 +68,9 @@ pub async fn parse_and_generate_tokens(
                     let start = offset_to_position(error_content, start_byte);
                     let end = offset_to_position(error_content, end_byte);
 
-                    let report = report_error_recovery(e, &error_file_path, error_content);
+                    let report = report_error_recovery(e, error_file_path.clone(), error_content);
                     let cache = (
-                        error_file_path.as_str(),
+                        error_file_path,
                         mutica::mutica_compiler::ariadne::Source::from(error_content),
                     );
                     let msg = report_to_plain_text(|buf: &mut Vec<u8>| report.write(cache, buf));
