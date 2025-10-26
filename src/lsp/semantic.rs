@@ -51,7 +51,7 @@ pub async fn parse_and_generate_tokens(
             let (range, message) = match builder_error.value() {
                 MultiFileBuilderError::SyntaxError(e) => {
                     let report =
-                        SyntaxError::new(e.clone()).report(error_file_path.clone(), error_content);
+                        SyntaxError::new(e.clone()).report(error_file_path.clone(), error_content, None);
                     let cache = (
                         error_file_path,
                         mutica::mutica_compiler::ariadne::Source::from(error_content),
@@ -68,9 +68,9 @@ pub async fn parse_and_generate_tokens(
                     let start = offset_to_position(error_content, start_byte);
                     let end = offset_to_position(error_content, end_byte);
 
-                    let report = report_error_recovery(e, &error_file_path, error_content);
+                    let report = report_error_recovery(e, error_file_path.clone(), error_content);
                     let cache = (
-                        error_file_path.as_str(),
+                        error_file_path,
                         mutica::mutica_compiler::ariadne::Source::from(error_content),
                     );
                     let msg = report_to_plain_text(|buf: &mut Vec<u8>| report.write(cache, buf));
@@ -311,60 +311,81 @@ pub async fn parse_and_generate_tokens(
             let line_start = byte_offset;
             let line_end = byte_offset + line_content.len();
 
-            let mut current_start: Option<usize> = None;
-            let mut current_type: Option<u32> = None;
+            // NOTE: basic_ast.1.color_mapping() is indexed by byte offset.
+            // VSCode / LSP expects token positions and lengths in UTF-16 code units (character indices),
+            // so we must iterate by characters and compute token runs in UTF-16 units while querying
+            // the color mapping by the character's starting byte offset.
 
-            for i in line_start..line_end {
+            let mut current_type: Option<u32> = None;
+            let mut run_utf16_len: u32 = 0; // length of current run in UTF-16 code units
+            let mut run_start_utf16_col: u32 = 0; // start column (utf-16 units) of current run relative to line
+
+            // running utf-16 column within the line
+            let mut utf16_col: u32 = 0;
+
+            // Iterate over characters in the line to correctly handle multi-byte UTF-8 characters
+            for (char_byte_rel, ch) in line_content.char_indices() {
+                let abs_byte = line_start + char_byte_rel;
                 let ty = basic_ast
                     .1
                     .color_mapping()
-                    .get(i)
+                    .get(abs_byte)
                     .map(|node| color_to_token_type(node))
-                    .unwrap_or(17); // Default token type
+                    .unwrap_or(17);
+
+                // number of UTF-16 code units for this char
+                let ch_utf16 = ch.encode_utf16(&mut [0u16; 2]).len() as u32;
 
                 if current_type != Some(ty) {
-                    if let (Some(start), Some(typ)) = (current_start, current_type) {
-                        let length = i - start;
-                        let col = start - line_start;
+                    // flush previous run
+                    if let Some(typ) = current_type {
                         let delta_line = line_num as u32 - last_line;
                         let delta_start = if delta_line == 0 {
-                            col as u32 - last_start
+                            run_start_utf16_col.saturating_sub(last_start)
                         } else {
-                            col as u32
+                            run_start_utf16_col
                         };
                         tokens.push(SemanticToken {
                             delta_line,
                             delta_start,
-                            length: length as u32,
+                            length: run_utf16_len,
                             token_type: typ,
                             token_modifiers_bitset: 0,
                         });
                         last_line = line_num as u32;
-                        last_start = col as u32;
+                        last_start = run_start_utf16_col;
                     }
-                    current_start = Some(i);
+
+                    // start a new run at current utf16_col
                     current_type = Some(ty);
+                    run_start_utf16_col = utf16_col;
+                    run_utf16_len = ch_utf16;
+                } else {
+                    run_utf16_len = run_utf16_len.saturating_add(ch_utf16);
                 }
+
+                utf16_col = utf16_col.saturating_add(ch_utf16);
             }
 
-            if let (Some(start), Some(typ)) = (current_start, current_type) {
-                let length = line_end - start;
-                let col = start - line_start;
-                let delta_line = line_num as u32 - last_line;
-                let delta_start = if delta_line == 0 {
-                    col as u32 - last_start
-                } else {
-                    col as u32
-                };
-                tokens.push(SemanticToken {
-                    delta_line,
-                    delta_start,
-                    length: length as u32,
-                    token_type: typ,
-                    token_modifiers_bitset: 0,
-                });
-                last_line = line_num as u32;
-                last_start = col as u32;
+            // flush remaining run at end of line
+            if let Some(typ) = current_type {
+                if run_utf16_len > 0 {
+                    let delta_line = line_num as u32 - last_line;
+                    let delta_start = if delta_line == 0 {
+                        run_start_utf16_col.saturating_sub(last_start)
+                    } else {
+                        run_start_utf16_col
+                    };
+                    tokens.push(SemanticToken {
+                        delta_line,
+                        delta_start,
+                        length: run_utf16_len,
+                        token_type: typ,
+                        token_modifiers_bitset: 0,
+                    });
+                    last_line = line_num as u32;
+                    last_start = run_start_utf16_col;
+                }
             }
 
             byte_offset = line_end + 1;

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-mutica = { version = "0.2.0", path = "../Mutica" }
+mutica = { version = "0.2.4", path = "../Mutica" }
 tower-lsp = "0.20.0"
 serde_json = "1.0.145"
 anyhow = "1.0.100"
