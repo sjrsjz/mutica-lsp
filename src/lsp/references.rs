@@ -82,9 +82,6 @@ pub fn collect_references<'ast>(
         LinearTypeAst::Namespace { expr, .. } => {
             collect_references(expr, table, source_file);
         }
-        LinearTypeAst::FixPoint { expr, .. } => {
-            collect_references(expr, table, source_file);
-        }
         LinearTypeAst::Literal(inner) => {
             collect_references(inner, table, source_file);
         }
