@@ -1,3 +1,4 @@
+use mutica::mutica_compiler::parser::inject_std_library;
 use mutica::mutica_compiler::parser::{
     MultiFileBuilder, MultiFileBuilderError, ParseContext, ParseError, SourceFile, SyntaxError,
     ast::LinearizeContext, calculate_full_error_span, colorize::TokenColor, report_error_recovery,
@@ -39,8 +40,10 @@ pub async fn parse_and_generate_tokens(
     let mut builder =
         MultiFileBuilder::new(&mut imported_ast, &mut path_detector, &mut builder_errors);
 
-    let (basic_ast_option, source) = builder.build(file_path.clone(), content.to_string());
-
+    let (mut basic_ast_option, source) = builder.build(file_path.clone(), content.to_string());
+    if let Some((basic_ast, _)) = &mut basic_ast_option {
+        *basic_ast = inject_std_library(basic_ast.clone(), &mut builder_errors);
+    }
     // 2. 统一处理所有构建过程中的错误
     let mut diagnostics = Vec::new();
     for builder_error in &builder_errors {
