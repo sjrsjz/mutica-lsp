@@ -1,9 +1,11 @@
 use mutica::mutica_compiler::parser::inject_std_library;
 use mutica::mutica_compiler::parser::{
-    MultiFileBuilder, MultiFileBuilderError, ParseContext, ParseError, SourceFile, SyntaxError,
-    ast::LinearizeContext, calculate_full_error_span, colorize::TokenColor, report_error_recovery,
+    MultiFileBuilder, MultiFileBuilderError, ParseContext, ParseError, SyntaxError,
+    ast::LinearizeContext, calculate_full_error_span, report_error_recovery,
 };
+use mutica::mutica_core::util::colorize::TokenColor;
 use mutica::mutica_core::util::cycle_detector::FastCycleDetector;
+use mutica::mutica_core::util::source_info::SourceFile;
 use mutica::mutica_semantic::semantic::SourceMapping;
 use std::collections::HashMap;
 use std::path::PathBuf;

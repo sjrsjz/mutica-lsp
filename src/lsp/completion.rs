@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Position, Url};
 
 pub fn get_completion_items() -> Vec<CompletionItem> {
     let keywords = vec![
-        "let", "with", "match", "rec", "loop", "panic", "discard", "int", "char", "true", "false",
+        "let", "with", "match", "rec", "loop", "panic", "discard", "nat", "char", "true", "false",
         "any", "none", "import", "if", "then", "else", "rot", "handle", "type", "eq", "is", "for",
         "in", "extend", "sub", "dyn_rec"
     ];

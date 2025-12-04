@@ -1,8 +1,8 @@
 use crate::lsp::utils::offset_to_position;
-use mutica::mutica_compiler::parser::{
-    SourceFile, WithLocation,
+use mutica::{mutica_compiler::parser::{
+    WithLocation,
     ast::{FlowedMetaData, LinearTypeAst},
-};
+}, mutica_core::util::source_info::SourceFile};
 use tower_lsp::lsp_types::Range;
 
 /// 递归遍历 AST 节点收集引用信息
