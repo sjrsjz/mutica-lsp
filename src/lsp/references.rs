@@ -44,15 +44,27 @@ pub fn collect_references<'ast>(
 
     // 递归遍历所有子节点
     match node.value() {
-        LinearTypeAst::Tuple(items)
-        | LinearTypeAst::Generalize(items)
+        LinearTypeAst::Generalize(items)
         | LinearTypeAst::Specialize(items) => {
             for item in items {
                 collect_references(item, table, source_file);
             }
         }
+        LinearTypeAst::Tuple(items)=>{
+            for item in items {
+                collect_references(&item.0, table, source_file);
+            }
+        }
         LinearTypeAst::Cons { head, tail } => {
-            collect_references(head, table, source_file);
+            for item in head {
+                collect_references(&item.0, table, source_file);
+            }
+            collect_references(tail, table, source_file);
+        }
+        LinearTypeAst::List { head, tail } => {
+            for item in head {
+                collect_references(&item.0, table, source_file);
+            }
             collect_references(tail, table, source_file);
         }
         LinearTypeAst::Match { branches, .. } => {
