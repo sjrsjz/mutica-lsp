@@ -1,8 +1,11 @@
 use crate::lsp::utils::offset_to_position;
-use mutica::{mutica_compiler::parser::{
-    WithLocation,
-    ast::{FlowedMetaData, LinearTypeAst},
-}, mutica_core::util::source_info::SourceFile};
+use mutica::{
+    mutica_compiler::parser::{
+        WithLocation,
+        ast::{FlowedMetaData, LinearTypeAst},
+    },
+    mutica_core::util::source_info::SourceFile,
+};
 use tower_lsp::lsp_types::Range;
 
 /// 递归遍历 AST 节点收集引用信息
@@ -44,13 +47,12 @@ pub fn collect_references<'ast>(
 
     // 递归遍历所有子节点
     match node.value() {
-        LinearTypeAst::Generalize(items)
-        | LinearTypeAst::Specialize(items) => {
+        LinearTypeAst::Generalize(items) | LinearTypeAst::Specialize(items) => {
             for item in items {
                 collect_references(item, table, source_file);
             }
         }
-        LinearTypeAst::Tuple(items)=>{
+        LinearTypeAst::Tuple(items) => {
             for item in items {
                 collect_references(&item.0, table, source_file);
             }
@@ -68,10 +70,20 @@ pub fn collect_references<'ast>(
             collect_references(tail, table, source_file);
         }
         LinearTypeAst::Match { branches, .. } => {
-            for (pattern, expr) in branches {
-                collect_references(pattern, table, source_file);
+            for (_, p, (f, g), expr) in branches {
+                collect_references(p, table, source_file);
+                collect_references(f, table, source_file);
+                collect_references(g, table, source_file);
                 collect_references(expr, table, source_file);
             }
+        }
+        LinearTypeAst::Generic {
+            expr, constraint, ..
+        } => {
+            collect_references(expr, table, source_file);
+            let (f, g) = constraint.as_ref();
+            collect_references(f, table, source_file);
+            collect_references(g, table, source_file);
         }
         LinearTypeAst::Invoke {
             func,
@@ -87,9 +99,6 @@ pub fn collect_references<'ast>(
             if let Some(handler) = perform_handler {
                 collect_references(handler, table, source_file);
             }
-        }
-        LinearTypeAst::Pattern { expr, .. } => {
-            collect_references(expr, table, source_file);
         }
         LinearTypeAst::Namespace { expr, .. } => {
             collect_references(expr, table, source_file);

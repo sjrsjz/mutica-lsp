@@ -6,7 +6,7 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
     let keywords = vec![
         "let", "with", "match", "rec", "loop", "panic", "discard", "nat", "char", "true", "false",
         "any", "none", "import", "if", "then", "else", "rot", "handle", "type", "eq", "is", "for",
-        "in", "extend", "sub", "dyn_rec"
+        "in", "extend", "sub", "dyn_rec", "where", "exist", "assert", "constraint"
     ];
 
     let operators = vec![

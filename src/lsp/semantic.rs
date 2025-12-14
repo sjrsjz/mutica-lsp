@@ -92,6 +92,17 @@ pub async fn parse_and_generate_tokens(
                     };
                     (range, format!("I/O Error: {}", e))
                 }
+                MultiFileBuilderError::TopLevelBindError(var) => {
+                    let span = loc.span();
+                    let range = Range {
+                        start: offset_to_position(error_content, span.start),
+                        end: offset_to_position(error_content, span.end),
+                    };
+                    (
+                        range,
+                        format!("Top-level binding error for variable '{}'", var.value()),
+                    )
+                }
             };
 
             diagnostics.push(Diagnostic {
@@ -106,16 +117,58 @@ pub async fn parse_and_generate_tokens(
 
     // 3. 如果构建成功，则继续处理
     if let Some(basic_ast) = basic_ast_option {
-        // 4. 语义分析和后续处理
-        let linearized = basic_ast
-            .0
-            .linearize(&mut LinearizeContext::new(), basic_ast.0.location())
+        // 4. 执行 auto_bind 转换，将 AutoBind 模式转换为 Standard 模式
+        let (desugared, leftover_binds) = basic_ast.0.auto_bind();
+
+        // 检查是否有未处理的绑定（这通常表示顶层有 Bind 节点，这是不应该出现的）
+        if !leftover_binds.is_empty() {
+            for (var, _) in leftover_binds {
+                builder_errors.push(
+                    var.clone()
+                        .map(|_| MultiFileBuilderError::TopLevelBindError(var)),
+                );
+            }
+
+            // 重新处理包含 TopLevelBindError 的错误
+            for builder_error in &builder_errors {
+                if let Some(loc) = builder_error.location() {
+                    let error_content = loc.source().content();
+
+                    if let MultiFileBuilderError::TopLevelBindError(var) = builder_error.value() {
+                        let span = loc.span();
+                        let range = Range {
+                            start: offset_to_position(error_content, span.start),
+                            end: offset_to_position(error_content, span.end),
+                        };
+                        diagnostics.push(Diagnostic {
+                            range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            source: Some("mutica-lsp".to_string()),
+                            message: format!(
+                                "Top-level binding error for variable '{}'",
+                                var.value()
+                            ),
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+
+            // 发送诊断信息并提前返回
+            client
+                .publish_diagnostics(uri.clone(), diagnostics, None)
+                .await;
+            return Ok((None, Vec::new(), None));
+        }
+
+        // 5. 语义分析和后续处理
+        let linearized = desugared
+            .linearize(&mut LinearizeContext::new(), desugared.location())
             .finalize();
 
         let mut semantic_errors = Vec::new();
         let flowed_result = linearized.flow(
             &mut ParseContext::new(),
-            false,
             linearized.location(),
             &mut semantic_errors,
         );
