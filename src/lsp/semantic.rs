@@ -192,6 +192,40 @@ pub async fn parse_and_generate_tokens(
 
             let mut error_items = Vec::new();
             match e.value() {
+                ParseError::OutgoingFixPointReference(ast, var, layer) => {
+                    if ast.location().is_none()
+                        || ast.location().unwrap().source() != source.as_ref()
+                    {
+                        continue;
+                    }
+                    let item = ast
+                        .location()
+                        .map(|loc| {
+                            let span = loc.span();
+                            let start = offset_to_position(content, span.start);
+                            let end = offset_to_position(content, span.end);
+                            (
+                                Range { start, end },
+                                format!(
+                                    "Fix-point variable '{}' referenced from {} layer(s) outside function scope",
+                                    var, layer
+                                ),
+                                DiagnosticSeverity::ERROR,
+                            )
+                        })
+                        .unwrap_or((
+                            Range {
+                                start: Position::new(0, 0),
+                                end: offset_to_position(content, content.len()),
+                            },
+                            format!(
+                                "Fix-point variable '{}' referenced from {} layer(s) outside function scope",
+                                var, layer
+                            ),
+                            DiagnosticSeverity::ERROR,
+                        ));
+                    error_items.push(item);
+                }
                 ParseError::UseBeforeDeclaration(ast, name) => {
                     if ast.location().is_none()
                         || ast.location().unwrap().source() != source.as_ref()

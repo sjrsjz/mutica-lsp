@@ -19,5 +19,8 @@ pub fn perr_to_message(err: &ParseError) -> Option<String> {
         }
         ParseError::MissingBranch(_) => Some("Missing required branch".to_string()),
         ParseError::InternalError(msg) => Some(format!("Internal error: {}", msg)),
+        ParseError::OutgoingFixPointReference(_, _, _) => {
+            Some("Outgoing fix-point reference".to_string())
+        }
     }
 }
