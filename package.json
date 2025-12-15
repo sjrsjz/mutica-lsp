@@ -84,9 +84,10 @@
     "package": "./package.sh"
   },
   "devDependencies": {
+    "@types/node": "^22.19.3",
     "@types/vscode": "^1.95.0",
-    "@types/node": "^22.0.0",
-    "typescript": "^5.9.0"
+    "@vscode/vsce": "^3.7.1",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

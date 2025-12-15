@@ -17,5 +17,7 @@ cp target/release/mutica-lsp bin/
 echo "Compiling TypeScript extension..."
 pnpm run compile
 
-echo "Build complete! Binary is in ./bin/mutica-lsp"
-echo "To package the extension, run: vsce package or npx @vscode/vsce package"
+echo "Packaging extension..."
+pnpm exec vsce package
+
+echo "Build complete! VSIX file created."
