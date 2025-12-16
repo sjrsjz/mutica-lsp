@@ -22,5 +22,7 @@ pub fn perr_to_message(err: &ParseError) -> Option<String> {
         ParseError::OutgoingFixPointReference(_, _, _) => {
             Some("Outgoing fix-point reference".to_string())
         }
+        ParseError::WildcardOutOfConstraint(_) => Some("Wildcard out of constraint".to_string()),
+        ParseError::AstNotDesugared(_) => Some("AST not desugared".to_string()),
     }
 }

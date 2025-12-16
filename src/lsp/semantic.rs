@@ -162,11 +162,15 @@ pub async fn parse_and_generate_tokens(
         }
 
         // 5. 语义分析和后续处理
+        let mut semantic_errors = Vec::new();
         let linearized = desugared
-            .linearize(&mut LinearizeContext::new(), desugared.location())
+            .linearize(
+                &mut LinearizeContext::new(),
+                &mut semantic_errors,
+                desugared.location(),
+            )
             .finalize();
 
-        let mut semantic_errors = Vec::new();
         let flowed_result = linearized.flow(
             &mut ParseContext::new(),
             linearized.location(),
@@ -222,6 +226,62 @@ pub async fn parse_and_generate_tokens(
                                 "Fix-point variable '{}' referenced from {} layer(s) outside function scope",
                                 var, layer
                             ),
+                            DiagnosticSeverity::ERROR,
+                        ));
+                    error_items.push(item);
+                }
+                ParseError::WildcardOutOfConstraint(ast) => {
+                    if ast.location().is_none()
+                        || ast.location().unwrap().source() != source.as_ref()
+                    {
+                        continue;
+                    }
+                    let item = ast
+                        .location()
+                        .map(|loc| {
+                            let span = loc.span();
+                            let start = offset_to_position(content, span.start);
+                            let end = offset_to_position(content, span.end);
+                            (
+                                Range { start, end },
+                                "Wildcard used outside of constraint context".to_string(),
+                                DiagnosticSeverity::ERROR,
+                            )
+                        })
+                        .unwrap_or((
+                            Range {
+                                start: Position::new(0, 0),
+                                end: offset_to_position(content, content.len()),
+                            },
+                            "Wildcard used outside of constraint context".to_string(),
+                            DiagnosticSeverity::ERROR,
+                        ));
+                    error_items.push(item);
+                }
+                ParseError::AstNotDesugared(ast) => {
+                    if ast.location().is_none()
+                        || ast.location().unwrap().source() != source.as_ref()
+                    {
+                        continue;
+                    }
+                    let item = ast
+                        .location()
+                        .map(|loc| {
+                            let span = loc.span();
+                            let start = offset_to_position(content, span.start);
+                            let end = offset_to_position(content, span.end);
+                            (
+                                Range { start, end },
+                                "AST node not desugared properly".to_string(),
+                                DiagnosticSeverity::ERROR,
+                            )
+                        })
+                        .unwrap_or((
+                            Range {
+                                start: Position::new(0, 0),
+                                end: offset_to_position(content, content.len()),
+                            },
+                            "AST node not desugared properly".to_string(),
                             DiagnosticSeverity::ERROR,
                         ));
                     error_items.push(item);
