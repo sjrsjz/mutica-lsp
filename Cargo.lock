@@ -219,6 +219,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
+name = "colored"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
+dependencies = [
+ "lazy_static",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -711,6 +721,7 @@ name = "mutica"
 version = "0.3.0"
 dependencies = [
  "clap",
+ "colored",
  "mutica-compiler",
  "mutica-core",
  "mutica-semantic",
@@ -724,7 +735,7 @@ dependencies = [
  "lalrpop-util",
  "logos",
  "mutica-core",
- "stacksafe",
+ "stacksafe 0.1.4",
 ]
 
 [[package]]
@@ -734,7 +745,7 @@ dependencies = [
  "ariadne",
  "rust-arc-gc",
  "smallvec",
- "stacksafe",
+ "stacksafe 0.1.4",
  "thiserror",
  "tokio",
 ]
@@ -747,6 +758,7 @@ dependencies = [
  "log",
  "mutica",
  "serde_json",
+ "stacksafe 1.0.0",
  "tokio",
  "tower-lsp",
 ]
@@ -1155,7 +1167,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d9c1172965d317e87ddb6d364a040d958b40a1db82b6ef97da26253a8b3d090"
 dependencies = [
  "stacker",
- "stacksafe-macro",
+ "stacksafe-macro 0.1.4",
+]
+
+[[package]]
+name = "stacksafe"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5481855df765c006135651b88e666edd4f08e176183052d2cb8628450873acb"
+dependencies = [
+ "stacker",
+ "stacksafe-macro 1.0.0",
 ]
 
 [[package]]
@@ -1163,6 +1185,17 @@ name = "stacksafe-macro"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "172175341049678163e979d9107ca3508046d4d2a7c6682bee46ac541b17db69"
+dependencies = [
+ "proc-macro-error2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "stacksafe-macro"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4825bd5b513e9bc047a10ffc1680d1203ef548bdccd633d633a15630f01d126f"
 dependencies = [
  "proc-macro-error2",
  "quote",

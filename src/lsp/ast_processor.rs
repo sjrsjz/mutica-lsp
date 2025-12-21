@@ -4,7 +4,7 @@ use mutica::mutica_compiler::parser::ParseError;
 pub fn perr_to_message(err: &ParseError) -> Option<String> {
     match err {
         ParseError::UseBeforeDeclaration(_, name) => {
-            Some(format!("Use of undeclared variable '{}'", name))
+            Some(format!("Use of undeclared variable '{}'", name.value()))
         }
         ParseError::RedeclaredCaptureValue(_, name) => {
             Some(format!("Redeclared capture variable '{}'", name.value()))
