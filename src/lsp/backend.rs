@@ -13,7 +13,7 @@ pub struct Backend {
     pub client: Client,
     pub documents: RwLock<HashMap<Url, String>>,
     pub last_tokens: RwLock<HashMap<Url, SemanticTokens>>,
-    pub reference_table: RwLock<HashMap<Url, Vec<(Range, Range)>>>,
+    pub reference_table: RwLock<HashMap<Url, Vec<(Range, Location)>>>,
     pub variable_maps: RwLock<HashMap<Url, Vec<Option<Vec<String>>>>>,
 }
 
@@ -258,12 +258,9 @@ impl LanguageServer for Backend {
 
         let table = self.reference_table.read().unwrap();
         if let Some(references) = table.get(&uri) {
-            for (use_range, def_range) in references {
+            for (use_range, def_location) in references {
                 if position_in_range(&position, use_range) {
-                    return Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                        uri: uri.clone(),
-                        range: *def_range,
-                    })));
+                    return Ok(Some(GotoDefinitionResponse::Scalar(def_location.clone())));
                 }
             }
         }
@@ -276,47 +273,71 @@ impl LanguageServer for Backend {
         let include_declaration = params.context.include_declaration;
 
         let table = self.reference_table.read().unwrap();
-        if let Some(references) = table.get(&uri) {
-            let mut target_def_range: Option<Range> = None;
 
-            for (use_range, def_range) in references {
+        // 首先找到目标定义的位置
+        let mut target_def_location: Option<Location> = None;
+
+        // 检查当前文件中是否有使用指向某个定义
+        if let Some(references) = table.get(&uri) {
+            for (use_range, def_location) in references {
                 if position_in_range(&position, use_range) {
-                    target_def_range = Some(*def_range);
+                    target_def_location = Some(def_location.clone());
                     break;
                 }
             }
 
-            if target_def_range.is_none() {
-                for (_, def_range) in references {
-                    if position_in_range(&position, def_range) {
-                        target_def_range = Some(*def_range);
+            // 如果没找到，检查光标是否在定义位置
+            if target_def_location.is_none() {
+                for (_, def_location) in references {
+                    if def_location.uri == uri && position_in_range(&position, &def_location.range)
+                    {
+                        target_def_location = Some(def_location.clone());
                         break;
                     }
                 }
             }
+        }
 
-            if let Some(def_range) = target_def_range {
-                let mut locations = Vec::new();
+        // 如果在当前文件没找到，检查其他文件的定义位置
+        if target_def_location.is_none() {
+            for (_, references) in table.iter() {
+                for (_, def_location) in references {
+                    if def_location.uri == uri && position_in_range(&position, &def_location.range)
+                    {
+                        target_def_location = Some(def_location.clone());
+                        break;
+                    }
+                }
+                if target_def_location.is_some() {
+                    break;
+                }
+            }
+        }
 
-                for (use_range, d_range) in references {
-                    if ranges_equal(d_range, &def_range) {
+        if let Some(def_location) = target_def_location {
+            let mut locations = Vec::new();
+
+            // 遍历所有文件查找指向该定义的引用
+            for (file_uri, references) in table.iter() {
+                for (use_range, d_location) in references {
+                    if d_location.uri == def_location.uri
+                        && ranges_equal(&d_location.range, &def_location.range)
+                    {
                         locations.push(Location {
-                            uri: uri.clone(),
+                            uri: file_uri.clone(),
                             range: *use_range,
                         });
                     }
                 }
-
-                if include_declaration {
-                    locations.push(Location {
-                        uri: uri.clone(),
-                        range: def_range,
-                    });
-                }
-
-                return Ok(Some(locations));
             }
+
+            if include_declaration {
+                locations.push(def_location);
+            }
+
+            return Ok(Some(locations));
         }
+
         Ok(None)
     }
 
@@ -326,52 +347,80 @@ impl LanguageServer for Backend {
         let new_name = params.new_name;
 
         let table = self.reference_table.read().unwrap();
-        if let Some(references) = table.get(&uri) {
-            let mut target_def_range: Option<Range> = None;
 
-            for (use_range, def_range) in references {
+        // 首先找到目标定义的位置
+        let mut target_def_location: Option<Location> = None;
+
+        // 检查当前文件中是否有使用指向某个定义
+        if let Some(references) = table.get(&uri) {
+            for (use_range, def_location) in references {
                 if position_in_range(&position, use_range) {
-                    target_def_range = Some(*def_range);
+                    target_def_location = Some(def_location.clone());
                     break;
                 }
             }
 
-            if target_def_range.is_none() {
-                for (_, def_range) in references {
-                    if position_in_range(&position, def_range) {
-                        target_def_range = Some(*def_range);
+            // 如果没找到，检查光标是否在定义位置
+            if target_def_location.is_none() {
+                for (_, def_location) in references {
+                    if def_location.uri == uri && position_in_range(&position, &def_location.range)
+                    {
+                        target_def_location = Some(def_location.clone());
                         break;
                     }
                 }
             }
+        }
 
-            if let Some(def_range) = target_def_range {
-                let mut text_edits = Vec::new();
+        // 如果在当前文件没找到，检查其他文件的定义位置
+        if target_def_location.is_none() {
+            for (_, references) in table.iter() {
+                for (_, def_location) in references {
+                    if def_location.uri == uri && position_in_range(&position, &def_location.range)
+                    {
+                        target_def_location = Some(def_location.clone());
+                        break;
+                    }
+                }
+                if target_def_location.is_some() {
+                    break;
+                }
+            }
+        }
 
-                text_edits.push(TextEdit {
-                    range: def_range,
+        if let Some(def_location) = target_def_location {
+            let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+
+            // 重命名定义本身
+            changes.insert(
+                def_location.uri.clone(),
+                vec![TextEdit {
+                    range: def_location.range,
                     new_text: new_name.clone(),
-                });
+                }],
+            );
 
-                for (use_range, d_range) in references {
-                    if ranges_equal(d_range, &def_range) {
-                        text_edits.push(TextEdit {
+            // 遍历所有文件查找并重命名所有引用
+            for (file_uri, references) in table.iter() {
+                for (use_range, d_location) in references {
+                    if d_location.uri == def_location.uri
+                        && ranges_equal(&d_location.range, &def_location.range)
+                    {
+                        changes.entry(file_uri.clone()).or_default().push(TextEdit {
                             range: *use_range,
                             new_text: new_name.clone(),
                         });
                     }
                 }
-
-                let mut changes = HashMap::new();
-                changes.insert(uri.clone(), text_edits);
-
-                return Ok(Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }));
             }
+
+            return Ok(Some(WorkspaceEdit {
+                changes: Some(changes),
+                document_changes: None,
+                change_annotations: None,
+            }));
         }
+
         Ok(None)
     }
 }

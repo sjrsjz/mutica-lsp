@@ -25,7 +25,7 @@ pub async fn parse_and_generate_tokens(
     client: &Client,
 ) -> Result<(
     Option<SemanticTokens>,
-    Vec<(Range, Range)>,
+    Vec<(Range, Location)>,
     Option<Vec<Option<Vec<String>>>>,
 )> {
     let file_path = if let Ok(path) = uri.to_file_path() {
@@ -212,7 +212,7 @@ pub async fn parse_and_generate_tokens(
                                 Range { start, end },
                                 format!(
                                     "Fix-point variable '{}' referenced from {} layer(s) outside function scope",
-                                    var, layer
+                                    var.value(), layer
                                 ),
                                 DiagnosticSeverity::ERROR,
                             )
@@ -224,7 +224,7 @@ pub async fn parse_and_generate_tokens(
                             },
                             format!(
                                 "Fix-point variable '{}' referenced from {} layer(s) outside function scope",
-                                var, layer
+                                var.value(), layer
                             ),
                             DiagnosticSeverity::ERROR,
                         ));
@@ -300,7 +300,7 @@ pub async fn parse_and_generate_tokens(
                             let end = offset_to_position(content, span.end);
                             (
                                 Range { start, end },
-                                format!("Use of undeclared variable '{}'", name),
+                                format!("Use of undeclared variable '{}'", name.value()),
                                 DiagnosticSeverity::ERROR,
                             )
                         })
@@ -309,7 +309,7 @@ pub async fn parse_and_generate_tokens(
                                 start: Position::new(0, 0),
                                 end: offset_to_position(content, content.len()),
                             },
-                            format!("Use of undeclared variable '{}'", name),
+                            format!("Use of undeclared variable '{}'", name.value()),
                             DiagnosticSeverity::ERROR,
                         ));
                     error_items.push(item);
