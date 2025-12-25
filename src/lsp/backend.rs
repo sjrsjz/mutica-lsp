@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
@@ -389,27 +389,65 @@ impl LanguageServer for Backend {
         }
 
         if let Some(def_location) = target_def_location {
+            // URI 规范化：转成文件路径再比较
+            let def_path = def_location.uri.to_file_path().ok();
+            
+            // 直接在 changes 层面去重
             let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+            let mut processed: HashSet<(String, u32, u32, u32, u32)> = HashSet::new();
+            
+            // URI 规范化映射
+            let mut uri_map: HashMap<String, Url> = HashMap::new();
+            let mut get_canonical_uri = |uri: &Url| -> Url {
+                if let Ok(path) = uri.to_file_path() {
+                    let key = path.to_string_lossy().to_lowercase();
+                    uri_map.entry(key).or_insert_with(|| uri.clone()).clone()
+                } else {
+                    uri.clone()
+                }
+            };
 
-            // 重命名定义本身
-            changes.insert(
-                def_location.uri.clone(),
-                vec![TextEdit {
-                    range: def_location.range,
-                    new_text: new_name.clone(),
-                }],
-            );
+            // 辅助函数：添加编辑操作（带去重）
+            let mut add_edit = |uri: &Url, range: Range| {
+                let key = if let Ok(path) = uri.to_file_path() {
+                    (
+                        path.to_string_lossy().to_lowercase(),
+                        range.start.line,
+                        range.start.character,
+                        range.end.line,
+                        range.end.character,
+                    )
+                } else {
+                    (
+                        uri.to_string().to_lowercase(),
+                        range.start.line,
+                        range.start.character,
+                        range.end.line,
+                        range.end.character,
+                    )
+                };
+                
+                if processed.insert(key) {
+                    let canonical = get_canonical_uri(uri);
+                    changes.entry(canonical).or_default().push(TextEdit {
+                        range,
+                        new_text: new_name.clone(),
+                    });
+                }
+            };
 
-            // 遍历所有文件查找并重命名所有引用
+            // 1. 添加定义位置的编辑
+            add_edit(&def_location.uri, def_location.range);
+
+            // 2. 添加所有引用位置的编辑
             for (file_uri, references) in table.iter() {
                 for (use_range, d_location) in references {
-                    if d_location.uri == def_location.uri
+                    // 用文件路径比较，不用 URI 字符串
+                    let d_path = d_location.uri.to_file_path().ok();
+                    if d_path.is_some() && d_path == def_path
                         && ranges_equal(&d_location.range, &def_location.range)
                     {
-                        changes.entry(file_uri.clone()).or_default().push(TextEdit {
-                            range: *use_range,
-                            new_text: new_name.clone(),
-                        });
+                        add_edit(file_uri, *use_range);
                     }
                 }
             }
