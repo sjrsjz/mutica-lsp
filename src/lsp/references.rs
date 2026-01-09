@@ -74,7 +74,7 @@ pub fn collect_references(
         LinearTypeAst::Namespace { expr, .. } => {
             collect_references(expr, table, source_file);
         }
-        LinearTypeAst::Literal(inner) => {
+        LinearTypeAst::Lazy(inner) => {
             collect_references(inner, table, source_file);
         }
         LinearTypeAst::Range { ty, .. } => {
@@ -82,6 +82,7 @@ pub fn collect_references(
         }
         LinearTypeAst::Char => {}
         LinearTypeAst::Float => {}
+        LinearTypeAst::Lambda => {}
         LinearTypeAst::FloatLiteral(_) => {}
         LinearTypeAst::CharLiteral(_) => {}
         LinearTypeAst::Variable(_) => {
