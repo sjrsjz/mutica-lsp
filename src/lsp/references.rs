@@ -82,9 +82,11 @@ pub fn collect_references(
         }
         LinearTypeAst::Char => {}
         LinearTypeAst::Float => {}
+        LinearTypeAst::NaturalNumberSet => {}
         LinearTypeAst::Lambda => {}
         LinearTypeAst::FloatLiteral(_) => {}
         LinearTypeAst::CharLiteral(_) => {}
+        LinearTypeAst::NaturalNumberLiteral(_) => {}
         LinearTypeAst::Variable(_) => {
             // 检查当前节点的 reference 字段
             if let Some(use_loc) = node.location()
@@ -170,6 +172,9 @@ pub fn collect_references(
         }
         LinearTypeAst::AtomicOpcode(_) => {}
         LinearTypeAst::SubOf { value } => {
+            collect_references(value, table, source_file);
+        }
+        LinearTypeAst::Mutable { value } => {
             collect_references(value, table, source_file);
         }
         LinearTypeAst::StaticFixPoint { expr, .. } => {

@@ -38,12 +38,14 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "exist",
         "assert",
         "constraint",
+        "mut",
+        "delay",
     ];
 
     let operators = vec![
         "->", "|->", "=>", "::", ".", "@", "|", "!", ":", "~", ",", "&", "==", "!=", "<", "<=",
         ">", ">=", "+", "-", "*", "/", "%", "=", ";", "#", "\\", "(", ")", "[", "]", "{", "}",
-        "|>", "..",
+        "|>", "..", ":=",
     ];
 
     let functions = vec![
@@ -54,12 +56,6 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "repr!",
         "display!",
         "perform!",
-        "break!",
-        "resume!",
-        "alloc!",
-        "dealloc!",
-        "set!",
-        "get!",
         "__add!",
         "__sub!",
         "__mul!",
@@ -70,7 +66,8 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "__less!",
         "__opcode!",
         "__neg!",
-        "__set!",
+        "__assign!",
+        "__set_fixpoint!",
         "__build_fixpoint!",
     ];
 
