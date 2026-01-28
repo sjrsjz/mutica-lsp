@@ -230,34 +230,6 @@ pub async fn parse_and_generate_tokens(
                         ));
                     error_items.push(item);
                 }
-                ParseError::WildcardOutOfConstraint(ast) => {
-                    if ast.location().is_none()
-                        || ast.location().unwrap().source() != source.as_ref()
-                    {
-                        continue;
-                    }
-                    let item = ast
-                        .location()
-                        .map(|loc| {
-                            let span = loc.span();
-                            let start = offset_to_position(content, span.start);
-                            let end = offset_to_position(content, span.end);
-                            (
-                                Range { start, end },
-                                "Wildcard used outside of constraint context".to_string(),
-                                DiagnosticSeverity::ERROR,
-                            )
-                        })
-                        .unwrap_or((
-                            Range {
-                                start: Position::new(0, 0),
-                                end: offset_to_position(content, content.len()),
-                            },
-                            "Wildcard used outside of constraint context".to_string(),
-                            DiagnosticSeverity::ERROR,
-                        ));
-                    error_items.push(item);
-                }
                 ParseError::AstNotDesugared(ast) => {
                     if ast.location().is_none()
                         || ast.location().unwrap().source() != source.as_ref()

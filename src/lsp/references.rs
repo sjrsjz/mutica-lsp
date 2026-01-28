@@ -41,10 +41,11 @@ pub fn collect_references(
             collect_references(tail, table, source_file);
         }
         LinearTypeAst::Match { branches, .. } => {
-            for (_, p, (f, g), expr) in branches {
+            for (p, c, expr) in branches {
                 collect_references(expr, table, source_file);
-                collect_references(g, table, source_file);
-                collect_references(f, table, source_file);
+                for (_, c) in c {
+                    collect_references(c, table, source_file);
+                }
                 collect_references(p, table, source_file);
             }
         }
@@ -52,9 +53,9 @@ pub fn collect_references(
             expr, constraint, ..
         } => {
             collect_references(expr, table, source_file);
-            let (f, g) = constraint.as_ref();
-            collect_references(g, table, source_file);
-            collect_references(f, table, source_file);
+            for (_, c) in constraint {
+                collect_references(c, table, source_file);
+            }
         }
         LinearTypeAst::Invoke {
             func,
@@ -83,7 +84,14 @@ pub fn collect_references(
         LinearTypeAst::Char => {}
         LinearTypeAst::Float => {}
         LinearTypeAst::NaturalNumberSet => {}
-        LinearTypeAst::Lambda => {}
+        LinearTypeAst::Lambda { patterns } => {
+            for (p, c) in patterns {
+                for (_, c) in c {
+                    collect_references(c, table, source_file);
+                }
+                collect_references(p, table, source_file);
+            }
+        }
         LinearTypeAst::FloatLiteral(_) => {}
         LinearTypeAst::CharLiteral(_) => {}
         LinearTypeAst::NaturalNumberLiteral(_) => {}
