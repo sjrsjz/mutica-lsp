@@ -22,7 +22,7 @@ let constraint repeat: any = constraint n: nat => constraint f: any => {
     match i
         | assert n => ()
         | constraint _T: any => {
-            discard f(i);
+            f(i);
             go(i + 1)
         }
         | panic

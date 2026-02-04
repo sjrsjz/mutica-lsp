@@ -75,6 +75,9 @@ pub fn collect_references(
         LinearTypeAst::Namespace { expr, .. } => {
             collect_references(expr, table, source_file);
         }
+        LinearTypeAst::Bind { expr, .. } => {
+            collect_references(expr, table, source_file);
+        }
         LinearTypeAst::Lazy(inner) => {
             collect_references(inner, table, source_file);
         }

@@ -13,15 +13,15 @@ let constraint Nothing::(Nothing: any) = maybe_pkg;
 let constraint String: any = List(char);
 
 let constraint println: any = constraint s: String => {
-    discard iter constraint c: char = s in {
-        discard print!(c);
+    @iter constraint c: char = s in {
+        print!(c);
     };
-    discard print!('\n');
+    print!('\n');
 };
 
 let constraint print: any = constraint s: String => {
-    iter constraint c: char = s in {
-        discard print!(c);
+    @iter constraint c: char = s in {
+        print!(c);
     }
 };
 

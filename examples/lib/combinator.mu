@@ -112,7 +112,7 @@ let constraint ignore_second: any = const;
 
 // void: 执行函数但忽略返回值
 let constraint void: any = constraint f: any => {
-    discard f;
+    f;
     ()
 };
 
