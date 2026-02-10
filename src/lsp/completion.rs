@@ -13,7 +13,6 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "nat",
         "char",
         "float",
-        "lambda",
         "true",
         "false",
         "any",
@@ -37,6 +36,7 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "constraint",
         "mut",
         "delay",
+        "typeof",
     ];
 
     let operators = vec![
@@ -50,6 +50,7 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "print!",
         "println!",
         "flush!",
+        "panic_with!",
         "repr!",
         "display!",
         "perform!",
@@ -67,6 +68,7 @@ pub fn get_completion_items() -> Vec<CompletionItem> {
         "__assign!",
         "__set_fixpoint!",
         "__build_fixpoint!",
+        "__typeof",
     ];
 
     let mut items = Vec::new();

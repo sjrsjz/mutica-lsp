@@ -42,11 +42,11 @@ pub fn collect_references(
         }
         LinearTypeAst::Match { branches, .. } => {
             for (p, c, expr) in branches {
-                collect_references(expr, table, source_file);
+                collect_references(p, table, source_file);
                 for (_, c) in c {
                     collect_references(c, table, source_file);
                 }
-                collect_references(p, table, source_file);
+                collect_references(expr, table, source_file);
             }
         }
         LinearTypeAst::Generic {
@@ -87,14 +87,6 @@ pub fn collect_references(
         LinearTypeAst::Char => {}
         LinearTypeAst::Float => {}
         LinearTypeAst::NaturalNumberSet => {}
-        LinearTypeAst::Lambda { patterns } => {
-            for (p, c) in patterns {
-                for (_, c) in c {
-                    collect_references(c, table, source_file);
-                }
-                collect_references(p, table, source_file);
-            }
-        }
         LinearTypeAst::FloatLiteral(_) => {}
         LinearTypeAst::CharLiteral(_) => {}
         LinearTypeAst::NaturalNumberLiteral(_) => {}
